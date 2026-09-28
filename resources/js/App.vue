@@ -2245,9 +2245,11 @@ html {
 ===================================================== */
 
 footer {
-  background: #111;
+  background: #f1eee8;
 
-  color: white;
+  color: #171717;
+
+  border-top: 1px solid #e2ddd4;
 
   padding: 65px 30px 25px;
 }
@@ -2273,7 +2275,7 @@ footer {
 }
 
 .footer-brand p {
-  color: #888;
+  color: #6b6b6b;
 
   line-height: 1.7;
 
@@ -2301,7 +2303,7 @@ footer {
 }
 
 .footer-links a {
-  color: #888;
+  color: #6b6b6b;
 
   text-decoration: none;
 
@@ -2311,7 +2313,7 @@ footer {
 }
 
 .footer-links a:hover {
-  color: white;
+  color: #d65f32;
 }
 
 .footer-bottom {
@@ -2321,13 +2323,13 @@ footer {
 
   padding-top: 20px;
 
-  border-top: 1px solid #2b2b2b;
+  border-top: 1px solid #ddd8d0;
 
   display: flex;
 
   justify-content: space-between;
 
-  color: #666;
+  color: #8a8a8a;
 
   font-size: 10px;
 }
