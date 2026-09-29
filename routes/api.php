@@ -1,27 +1,63 @@
 <?php
 
-use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\ChatController;
 use App\Http\Controllers\Api\CommunicationController;
+use App\Http\Controllers\Api\DiscoveryController;
+use App\Http\Controllers\Api\ProfilePhotoController;
+use App\Http\Controllers\Api\TravelerController;
+use App\Http\Controllers\Api\TripController;
+use Illuminate\Support\Facades\Route;
 
+// Discovery / Public APIs
+Route::get('/travelers', [TravelerController::class, 'index']);
+Route::get('/travelers/{user}/photo', [ProfilePhotoController::class, 'show']);
+Route::get('/travelers/{user}', [TravelerController::class, 'show']);
+
+Route::get('/trips', [TripController::class, 'index']);
+Route::get('/trips/{trip}', [TripController::class, 'show']);
+
+Route::get('/stats', [DiscoveryController::class, 'stats']);
+Route::get('/filter-options', [DiscoveryController::class, 'filters']);
+
+// Authentication
 Route::post('/register', [AuthController::class, 'register']);
 Route::post('/login', [AuthController::class, 'login']);
 
 Route::middleware('auth:sanctum')->group(function () {
 
+    // User / Profile
     Route::get('/user', [AuthController::class, 'user']);
+    Route::patch('/user', [AuthController::class, 'updateProfile']);
 
-    Route::post('/logout', [AuthController::class, 'logout']);
+    // Profile Photo
+    Route::post('/user/photo', [ProfilePhotoController::class, 'store']);
+    Route::delete('/user/photo', [ProfilePhotoController::class, 'destroy']);
+
+    // Trips
+    Route::get('/user/trips', [TripController::class, 'mine']);
+    Route::post('/trips', [TripController::class, 'store']);
+    Route::patch('/trips/{trip}', [TripController::class, 'update']);
+
+    // Travel Preferences
+    Route::put('/travel-preferences', [AuthController::class, 'savePreferences']);
+
+    // Notifications
     Route::get('/notifications', [CommunicationController::class, 'notifications']);
     Route::post('/notifications/{id}/read', [CommunicationController::class, 'markNotificationRead']);
-    Route::post('/presence', [CommunicationController::class, 'heartbeat']);
-    Route::get('/users', [CommunicationController::class, 'users']);
-});
 
-Route::middleware('auth:sanctum')->group(function () {
+    // Presence
+    Route::post('/presence', [CommunicationController::class, 'heartbeat']);
+
+    // Users
+    Route::get('/users', [CommunicationController::class, 'users']);
+
+    // Chat / Conversations
     Route::get('/conversations', [ChatController::class, 'index']);
     Route::post('/conversations', [ChatController::class, 'store']);
     Route::get('/conversations/{id}/messages', [ChatController::class, 'getMessages']);
     Route::post('/messages', [ChatController::class, 'sendMessage']);
+
+    // Logout
+    Route::post('/logout', [AuthController::class, 'logout']);
 });

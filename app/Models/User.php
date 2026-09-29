@@ -2,17 +2,38 @@
 
 namespace App\Models;
 
-use App\Models\TravelPreference;
+use App\Models\Conversation;
 use Database\Factories\UserFactory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
-use Laravel\Sanctum\HasApiTokens; // <--- ১. Sanctum Trait টি Import করুন
+use Laravel\Sanctum\HasApiTokens;
 
 class User extends Authenticatable
 {
     /** @use HasFactory<UserFactory> */
-    use HasFactory, Notifiable, HasApiTokens; // <--- ২. এখানে HasApiTokens যোগ করুন
+    use HasApiTokens, HasFactory, Notifiable;
+
+    protected $appends = ['profile_photo_url'];
+
+    public function getProfilePhotoUrlAttribute(): ?string
+    {
+        return $this->profile_photo
+            ? url('/api/travelers/' . $this->id . '/photo') . '?v=' . substr(sha1($this->profile_photo), 0, 12)
+            : null;
+    }
+
+    public function scopeDiscoverable($query)
+    {
+        return $query->where('is_blocked', false)
+            ->where('role', 'user');
+    }
+
+    public function trips()
+    {
+        return $this->hasMany(Trip::class);
+    }
 
     /**
      * The attributes that are mass assignable.
@@ -64,8 +85,13 @@ class User extends Authenticatable
         return $this->hasOne(TravelPreference::class);
     }
 
-    public function conversations()
-{
-    return $this->belongsToMany(Conversation::class)->withTimestamps();
-}
+    /**
+     * User belongs to many conversations.
+     */
+    public function conversations(): BelongsToMany
+    {
+        return $this->belongsToMany(Conversation::class)
+            ->withPivot('last_read_at')
+            ->withTimestamps();
+    }
 }

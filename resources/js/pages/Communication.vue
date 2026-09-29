@@ -280,19 +280,37 @@ async function refreshData() {
         showLogin.value = true
         return
     }
-    error.value = ''
     try {
-        const [{ data: userData }] = await Promise.all([
+        const [userResult, presenceResult, conversationsResult, notificationsResult] = await Promise.allSettled([
             api.get('/user'),
             api.post('/presence'),
             loadConversations(),
             loadNotifications(),
         ])
-        currentUser.value = userData.user
+        if (userResult.status === 'rejected') throw userResult.reason
+        currentUser.value = userResult.value.data.user
+
+        if (conversationsResult.status === 'rejected') {
+            error.value = apiErrorMessage(conversationsResult.reason, 'Could not load conversations.')
+            return
+        }
+
+        if (presenceResult.status === 'rejected') {
+            error.value = apiErrorMessage(presenceResult.reason, 'Online status is temporarily unavailable.')
+        } else if (notificationsResult.status === 'rejected') {
+            error.value = apiErrorMessage(notificationsResult.reason, 'Notifications are temporarily unavailable.')
+        } else {
+            error.value = ''
+        }
+
         if (selectedConversation.value) {
-            const { data } = await api.get(`/conversations/${selectedConversation.value.id}/messages`)
-            messages.value = data
-            scrollMessagesToEnd()
+            try {
+                const { data } = await api.get(`/conversations/${selectedConversation.value.id}/messages`)
+                messages.value = data
+                scrollMessagesToEnd()
+            } catch (exception) {
+                error.value = apiErrorMessage(exception, 'Could not load messages.')
+            }
         }
     } catch (exception) {
         if (exception.response?.status === 401) {
@@ -300,7 +318,7 @@ async function refreshData() {
             localStorage.removeItem('travelmate_token')
             showLogin.value = true
         } else {
-            error.value = apiErrorMessage(exception, 'Could not connect to TravelMate. Please retry shortly.')
+            error.value = apiErrorMessage(exception, 'Could not load your account. Please sign in again.')
         }
     }
 }
