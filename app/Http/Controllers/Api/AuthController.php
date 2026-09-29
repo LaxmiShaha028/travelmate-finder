@@ -59,8 +59,36 @@ class AuthController extends Controller
     public function user(Request $request)
     {
         return response()->json([
-            'user' => $request->user()
+            'user' => $request->user()->load('travelPreference')
         ]);
+    }
+
+    public function updateProfile(Request $request)
+    {
+        $data = $request->validate([
+            'name' => 'required|string|max:255',
+            'bio' => 'nullable|string|max:2000',
+            'date_of_birth' => 'nullable|date|before_or_equal:today',
+            'gender' => 'nullable|string|max:50',
+        ]);
+        $request->user()->update($data);
+        return response()->json(['user' => $request->user()->fresh()->load('travelPreference')]);
+    }
+
+    public function savePreferences(Request $request)
+    {
+        $rules = [];
+        foreach (['destination', 'date', 'budget', 'style', 'companions', 'interests'] as $key) {
+            $rules[$key] = 'required|string|max:255';
+        }
+        $answers = $request->validate($rules);
+        $request->user()->travelPreference()->updateOrCreate([], [
+            'answers' => $answers,
+            'travel_style' => $answers['style'],
+            'interests' => [$answers['interests']],
+            'preferred_destinations' => [$answers['destination']],
+        ]);
+        return response()->json(['message' => 'Preferences saved']);
     }
 
     public function logout(Request $request)

@@ -11,6 +11,7 @@ class TravelPreference extends Model
 
     protected $fillable = [
         'user_id',
+        'answers',
         'min_budget',
         'max_budget',
         'travel_style',
@@ -21,6 +22,7 @@ class TravelPreference extends Model
     protected function casts(): array
     {
         return [
+            'answers' => 'array',
             'min_budget' => 'decimal:2',
             'max_budget' => 'decimal:2',
             'interests' => 'array',
