@@ -9,6 +9,10 @@ Route::get('/', function () {
     return Inertia::render('TravelMate');
 });
 
+Route::get('/communication', function () {
+    return Inertia::render('Communication');
+});
+
 Route::get('/dashboard', function () {
     return Inertia::render('Dashboard');
 })->middleware(['auth', 'verified'])->name('dashboard');
