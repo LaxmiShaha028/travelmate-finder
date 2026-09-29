@@ -2,16 +2,35 @@
 
 namespace App\Models;
 
-use App\Models\TravelPreference;
 use Database\Factories\UserFactory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
+use Laravel\Sanctum\HasApiTokens;
 
 class User extends Authenticatable
 {
     /** @use HasFactory<UserFactory> */
-    use HasFactory, Notifiable;
+    use HasApiTokens, HasFactory, Notifiable;
+
+    protected $appends = ['profile_photo_url'];
+
+    public function getProfilePhotoUrlAttribute(): ?string
+    {
+        return $this->profile_photo
+            ? url('/api/travelers/'.$this->id.'/photo').'?v='.substr(sha1($this->profile_photo), 0, 12)
+            : null;
+    }
+
+    public function scopeDiscoverable($query)
+    {
+        return $query->where('is_blocked', false)->where('role', 'user');
+    }
+
+    public function trips()
+    {
+        return $this->hasMany(Trip::class);
+    }
 
     /**
      * The attributes that are mass assignable.
