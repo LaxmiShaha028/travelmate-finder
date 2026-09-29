@@ -2,7 +2,7 @@
 
 namespace App\Models;
 
-// use Illuminate\Contracts\Auth\MustVerifyEmail;
+use App\Models\TravelPreference;
 use Database\Factories\UserFactory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Foundation\Auth\User as Authenticatable;
@@ -22,6 +22,13 @@ class User extends Authenticatable
         'name',
         'email',
         'password',
+        'profile_photo',
+        'date_of_birth',
+        'gender',
+        'bio',
+        'role',
+        'verification_status',
+        'is_blocked',
     ];
 
     /**
@@ -44,6 +51,15 @@ class User extends Authenticatable
         return [
             'email_verified_at' => 'datetime',
             'password' => 'hashed',
+            'is_blocked' => 'boolean',
         ];
+    }
+
+    /**
+     * User has one travel preference.
+     */
+    public function travelPreference()
+    {
+        return $this->hasOne(TravelPreference::class);
     }
 }
