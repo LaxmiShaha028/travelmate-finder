@@ -3,9 +3,9 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Models\User;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
-use App\Models\User;
 
 class AuthController extends Controller
 {
@@ -39,9 +39,9 @@ class AuthController extends Controller
             'password' => 'required',
         ]);
 
-        if (!Auth::attempt($credentials)) {
+        if (! Auth::attempt($credentials)) {
             return response()->json([
-                'message' => 'Invalid email or password'
+                'message' => 'Invalid email or password',
             ], 401);
         }
 
@@ -59,7 +59,7 @@ class AuthController extends Controller
     public function user(Request $request)
     {
         return response()->json([
-            'user' => $request->user()->load('travelPreference')
+            'user' => $request->user()->load('travelPreference'),
         ]);
     }
 
@@ -72,6 +72,7 @@ class AuthController extends Controller
             'gender' => 'nullable|string|max:50',
         ]);
         $request->user()->update($data);
+
         return response()->json(['user' => $request->user()->fresh()->load('travelPreference')]);
     }
 
@@ -81,13 +82,23 @@ class AuthController extends Controller
         foreach (['destination', 'date', 'budget', 'style', 'companions', 'interests'] as $key) {
             $rules[$key] = 'required|string|max:255';
         }
-        $answers = $request->validate($rules);
-        $request->user()->travelPreference()->updateOrCreate([], [
+        $data = $request->validate($rules + [
+            'travel_start' => 'nullable|date_format:Y-m-d|required_with:travel_end',
+            'travel_end' => 'nullable|date_format:Y-m-d|required_with:travel_start|after_or_equal:travel_start',
+            'duration_days' => 'nullable|integer|min:1|max:365',
+            'min_budget' => 'nullable|numeric|min:0|max:99999999',
+            'max_budget' => ['nullable', 'numeric', 'min:0', 'max:99999999', ...($request->filled('min_budget') ? ['gte:min_budget'] : [])],
+        ]);
+        $answers = array_intersect_key($data, $rules);
+        $structuredKeys = ['travel_start', 'travel_end', 'duration_days', 'min_budget', 'max_budget'];
+        $structured = array_intersect_key($data, array_flip($structuredKeys)) + array_fill_keys($structuredKeys, null);
+        $request->user()->travelPreference()->updateOrCreate([], $structured + [
             'answers' => $answers,
             'travel_style' => $answers['style'],
             'interests' => [$answers['interests']],
             'preferred_destinations' => [$answers['destination']],
         ]);
+
         return response()->json(['message' => 'Preferences saved']);
     }
 
@@ -96,7 +107,7 @@ class AuthController extends Controller
         $request->user()->currentAccessToken()->delete();
 
         return response()->json([
-            'message' => 'Logout successful'
+            'message' => 'Logout successful',
         ]);
     }
 }

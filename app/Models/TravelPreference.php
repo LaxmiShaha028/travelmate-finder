@@ -12,6 +12,9 @@ class TravelPreference extends Model
     protected $fillable = [
         'user_id',
         'answers',
+        'travel_start',
+        'travel_end',
+        'duration_days',
         'min_budget',
         'max_budget',
         'travel_style',
@@ -23,6 +26,9 @@ class TravelPreference extends Model
     {
         return [
             'answers' => 'array',
+            'travel_start' => 'date:Y-m-d',
+            'travel_end' => 'date:Y-m-d',
+            'duration_days' => 'integer',
             'min_budget' => 'decimal:2',
             'max_budget' => 'decimal:2',
             'interests' => 'array',
