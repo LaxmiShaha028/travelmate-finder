@@ -11,9 +11,11 @@ return new class extends Migration
      */
     public function up(): void
     {
-        Schema::table('users', function (Blueprint $table) {
-    $table->boolean('is_blocked')->default(false);
-});
+        if (! Schema::hasColumn('users', 'is_blocked')) {
+            Schema::table('users', function (Blueprint $table) {
+                $table->boolean('is_blocked')->default(false);
+            });
+        }
     }
 
     /**

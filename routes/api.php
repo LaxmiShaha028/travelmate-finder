@@ -30,6 +30,8 @@ Route::middleware('auth:sanctum')->group(function () {
 
     // User / Profile
     Route::get('/user', [AuthController::class, 'user']);
+    Route::get('/user/matches', [\App\Http\Controllers\Api\MatchController::class, 'index']);
+    Route::get('/user/trip-matches', [\App\Http\Controllers\Api\TripMatchController::class, 'index']);
     Route::patch('/user', [AuthController::class, 'updateProfile']);
 
     // Profile Photo
