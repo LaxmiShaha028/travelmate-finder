@@ -18,9 +18,9 @@ it('creates a private conversation once and includes it in the user list', funct
     $second = User::factory()->create();
 
     $this->actingAs($first, 'sanctum')
-        ->postJson('/api/conversations', ['user_ids' => [$second->id]])
+        ->postJson('/api/conversations', ['user_id' => $second->id])
         ->assertCreated()
-        ->assertJsonPath('type', 'private');
+        ->assertJsonPath('data.type', 'private');
 
     $this->actingAs($first, 'sanctum')
         ->postJson('/api/conversations', ['user_ids' => [$second->id]])
@@ -29,7 +29,26 @@ it('creates a private conversation once and includes it in the user list', funct
     $this->actingAs($first, 'sanctum')
         ->getJson('/api/conversations')
         ->assertOk()
-        ->assertJsonCount(1);
+        ->assertJsonCount(1, 'data');
+});
+
+it('uses the existing Laravel session and includes the signed-in user in a private chat', function () {
+    $owner = User::factory()->create();
+    $contact = User::factory()->create();
+    $origin = config('app.url');
+
+    $this->actingAs($owner)
+        ->withHeader('Origin', $origin)
+        ->postJson('/api/conversations', ['user_id' => $contact->id])
+        ->assertCreated()
+        ->assertJsonFragment(['id' => $owner->id, 'name' => $owner->name])
+        ->assertJsonFragment(['id' => $contact->id, 'name' => $contact->name]);
+
+    $this->actingAs($owner)
+        ->withHeader('Origin', $origin)
+        ->getJson('/api/conversations')
+        ->assertOk()
+        ->assertJsonCount(1, 'data');
 });
 
 it('creates a group conversation with the requested members', function () {
@@ -43,8 +62,23 @@ it('creates a group conversation with the requested members', function () {
             'user_ids' => $members->pluck('id')->all(),
         ])
         ->assertCreated()
-        ->assertJsonPath('name', 'Weekend trip')
-        ->assertJsonCount(3, 'users');
+        ->assertJsonPath('data.name', 'Weekend trip')
+        ->assertJsonCount(3, 'data.users');
+});
+
+it('creates a group conversation from comma-separated traveler ids', function () {
+    $owner = User::factory()->create();
+    $members = User::factory()->count(2)->create();
+
+    $this->actingAs($owner, 'sanctum')
+        ->postJson('/api/conversations', [
+            'type' => 'group',
+            'name' => 'Weekend trip',
+            'traveler_ids' => $members->pluck('id')->implode(', '),
+        ])
+        ->assertCreated()
+        ->assertJsonPath('data.type', 'group')
+        ->assertJsonCount(3, 'data.users');
 });
 
 it('returns messages in order only to conversation members', function () {
@@ -101,6 +135,23 @@ it('sends messages as the authenticated member and blocks outsiders', function (
         ->postJson('/api/notifications/'.$notificationResponse->json('notifications.0.id').'/read')
         ->assertOk()
         ->assertJsonPath('unread_count', 0);
+});
+
+it('supports sending a message through the conversation route', function () {
+    $member = User::factory()->create();
+    $otherMember = User::factory()->create();
+    $outsider = User::factory()->create();
+    $conversation = makeConversationBetween($member, $otherMember);
+
+    $this->actingAs($member, 'sanctum')
+        ->postJson("/api/conversations/{$conversation->id}/messages", ['message' => 'Hello from chat'])
+        ->assertCreated()
+        ->assertJsonPath('data.message', 'Hello from chat')
+        ->assertJsonPath('data.sender.id', $member->id);
+
+    $this->actingAs($outsider, 'sanctum')
+        ->postJson("/api/conversations/{$conversation->id}/messages", ['message' => 'Not allowed'])
+        ->assertForbidden();
 });
 
 it('searches travelers without returning the signed-in user', function () {

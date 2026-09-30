@@ -8,6 +8,8 @@ use App\Http\Controllers\Api\ProfilePhotoController;
 use App\Http\Controllers\Api\TravelerController;
 use App\Http\Controllers\Api\TripController;
 use Illuminate\Support\Facades\Route;
+use App\Http\Controllers\Api\ConversationController;
+use App\Http\Controllers\Api\MessageController;
 
 // Discovery / Public APIs
 Route::get('/travelers', [TravelerController::class, 'index']);
@@ -53,9 +55,11 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/users', [CommunicationController::class, 'users']);
 
     // Chat / Conversations
-    Route::get('/conversations', [ChatController::class, 'index']);
-    Route::post('/conversations', [ChatController::class, 'store']);
+    Route::get('/conversations', [ConversationController::class, 'index']);
+    Route::post('/conversations', [ConversationController::class, 'store']);
+    Route::get('/conversations/{conversation}', [ConversationController::class, 'show']);
     Route::get('/conversations/{id}/messages', [ChatController::class, 'getMessages']);
+    Route::post('/conversations/{conversation}/messages', [MessageController::class, 'store']);
     Route::post('/messages', [ChatController::class, 'sendMessage']);
 
     // Logout

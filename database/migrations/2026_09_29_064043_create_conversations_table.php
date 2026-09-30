@@ -10,14 +10,23 @@ return new class extends Migration
      * Run the migrations.
      */
     public function up(): void
-    {
-     Schema::create('conversations', function (Blueprint $table) {
-    $table->id();
-    $table->string('name')->nullable(); // গ্রুপ হলে নাম থাকবে
-    $table->enum('type', ['private', 'group'])->default('private');
-    $table->timestamps();
-});
-    }
+{
+    Schema::create('conversations', function (Blueprint $table) {
+        $table->id();
+
+        $table->enum('type', ['private', 'group'])
+              ->default('private');
+
+        $table->foreignId('trip_id')
+              ->nullable()
+              ->constrained()
+              ->nullOnDelete();
+
+        $table->string('name')->nullable();
+
+        $table->timestamps();
+    });
+}
 
     /**
      * Reverse the migrations.

@@ -10,4 +10,15 @@ export default defineConfig({
         }),
         vue(),
     ],
+    server: {
+        host: 'localhost',
+        port: 5187,
+        strictPort: true,
+        origin: 'http://localhost:5187',
+        proxy: {
+            '^/$': 'http://127.0.0.1:8000',
+            '^/communication(?:/|$)': 'http://127.0.0.1:8000',
+            '^/api(?:/|$)': 'http://127.0.0.1:8000',
+        },
+    },
 });

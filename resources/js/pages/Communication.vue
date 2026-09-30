@@ -1,13 +1,16 @@
 <script setup>
 import axios from 'axios'
+import { usePage } from '@inertiajs/vue3'
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 
 const api = axios.create({
-    baseURL: import.meta.env.VITE_API_BASE_URL || (import.meta.env.DEV ? 'http://127.0.0.1:8000/api' : '/api'),
+    baseURL: import.meta.env.VITE_API_BASE_URL || '/api',
+    withCredentials: true,
+    withXSRFToken: true,
 })
 
 const token = ref(localStorage.getItem('travelmate_token') || '')
-const currentUser = ref(null)
+const currentUser = ref(usePage().props.auth?.user || null)
 const conversations = ref([])
 const selectedConversation = ref(null)
 const messages = ref([])
@@ -17,17 +20,19 @@ const unreadCount = ref(0)
 const search = ref('')
 const contactSearch = ref('')
 const draft = ref('')
-const activeFilter = ref('all')
+const activeFilter = ref('private')
 const newChatType = ref('private')
 const groupName = ref('')
 const selectedContactIds = ref([])
 const showNewChat = ref(false)
+const pendingNewChat = ref(false)
 const showNotifications = ref(false)
 const showLogin = ref(false)
 const authMode = ref('login')
 const loginForm = ref({ name: '', email: '', password: '', password_confirmation: '' })
 const error = ref('')
 const loading = ref(false)
+const retryAvailable = ref(false)
 let refreshTimer
 let contactSearchRequest = 0
 let chatSearchTimer
@@ -49,7 +54,7 @@ api.interceptors.request.use((config) => {
 })
 
 api.interceptors.response.use((response) => response, (exception) => {
-    if (exception.response?.status === 401 && token.value) {
+    if (exception.response?.status === 401 && isAuthenticated.value) {
         token.value = ''
         currentUser.value = null
         conversations.value = []
@@ -78,12 +83,17 @@ const visibleConversations = computed(() => conversations.value.filter((conversa
     return matchesFilter && (!searchTerm || searchText.includes(searchTerm))
 }))
 
+const isAuthenticated = computed(() => Boolean(token.value || currentUser.value))
+
 const selectedTitle = computed(() => {
     if (!selectedConversation.value) return ''
     if (selectedConversation.value.type === 'group') return selectedConversation.value.name
     return selectedConversation.value.users
         ?.find((user) => user.id !== currentUser.value?.id)?.name || 'Private conversation'
 })
+
+const selectedPartner = computed(() => selectedConversation.value?.users
+    ?.find((user) => user.id !== currentUser.value?.id))
 
 const onlineMemberCount = computed(() => selectedConversation.value?.users
     ?.filter((user) => user.is_online).length || 0)
@@ -119,9 +129,10 @@ watch(search, (value) => {
 
 async function loadConversations() {
     const { data } = await api.get('/conversations')
-    conversations.value = data
+    const conversationList = Array.isArray(data) ? data : (data.data || [])
+    conversations.value = conversationList
     if (selectedConversation.value) {
-        selectedConversation.value = data.find((item) => item.id === selectedConversation.value.id) || null
+        selectedConversation.value = conversationList.find((item) => item.id === selectedConversation.value.id) || null
     }
 }
 
@@ -160,7 +171,7 @@ function scrollMessagesToEnd() {
 
 async function loadContacts() {
     const requestId = ++contactSearchRequest
-    if (!token.value) {
+    if (!isAuthenticated.value) {
         showLogin.value = true
         showNewChat.value = false
         return
@@ -176,7 +187,8 @@ async function loadContacts() {
 }
 
 async function openNewChat() {
-    if (!token.value) {
+    if (!isAuthenticated.value) {
+        pendingNewChat.value = true
         showLogin.value = true
         return
     }
@@ -199,7 +211,11 @@ async function startConversation(user) {
     loading.value = true
     error.value = ''
     try {
-        const { data } = await api.post('/conversations', { user_ids: [user.id] })
+        const { data: response } = await api.post('/conversations', {
+            user_id: user.id,
+            user_ids: [user.id],
+        })
+        const data = response.data || response
         await loadConversations()
         const conversation = conversations.value.find((item) => item.id === data.id) || data
         showNewChat.value = false
@@ -216,11 +232,12 @@ async function createGroupConversation() {
     loading.value = true
     error.value = ''
     try {
-        const { data } = await api.post('/conversations', {
+        const { data: response } = await api.post('/conversations', {
             type: 'group',
             name: groupName.value.trim(),
             user_ids: selectedContactIds.value,
         })
+        const data = response.data || response
         await loadConversations()
         const conversation = conversations.value.find((item) => item.id === data.id) || data
         showNewChat.value = false
@@ -265,7 +282,11 @@ async function login() {
         localStorage.setItem('travelmate_token', data.token)
         showLogin.value = false
         loginForm.value = { name: '', email: '', password: '', password_confirmation: '' }
-        await refreshData()
+        const shouldOpenNewChat = pendingNewChat.value
+        pendingNewChat.value = false
+        const loaded = await refreshData()
+        if (loaded) startRefreshPolling()
+        if (shouldOpenNewChat) await openNewChat()
     } catch (exception) {
         error.value = apiErrorMessage(exception, authMode.value === 'register'
                 ? 'Could not create your account.'
@@ -276,11 +297,15 @@ async function login() {
 }
 
 async function refreshData() {
-    if (!token.value) {
-        showLogin.value = true
-        return
-    }
+    error.value = ''
+    retryAvailable.value = false
     try {
+        if (!isAuthenticated.value) {
+            const { data } = await api.get('/user')
+            currentUser.value = data.user
+        }
+
+        showLogin.value = false
         const [userResult, presenceResult, conversationsResult, notificationsResult] = await Promise.allSettled([
             api.get('/user'),
             api.post('/presence'),
@@ -292,7 +317,9 @@ async function refreshData() {
 
         if (conversationsResult.status === 'rejected') {
             error.value = apiErrorMessage(conversationsResult.reason, 'Could not load conversations.')
-            return
+            retryAvailable.value = true
+            stopRefreshPolling()
+            return false
         }
 
         if (presenceResult.status === 'rejected') {
@@ -310,8 +337,12 @@ async function refreshData() {
                 scrollMessagesToEnd()
             } catch (exception) {
                 error.value = apiErrorMessage(exception, 'Could not load messages.')
+                retryAvailable.value = true
+                stopRefreshPolling()
+                return false
             }
         }
+        return true
     } catch (exception) {
         if (exception.response?.status === 401) {
             token.value = ''
@@ -319,14 +350,36 @@ async function refreshData() {
             showLogin.value = true
         } else {
             error.value = apiErrorMessage(exception, 'Could not load your account. Please sign in again.')
+            retryAvailable.value = true
+            stopRefreshPolling()
         }
+        return false
     }
+}
+
+function startRefreshPolling() {
+    if (refreshTimer || !isAuthenticated.value) return
+    refreshTimer = window.setInterval(() => {
+        if (isAuthenticated.value) refreshData()
+    }, 12000)
+}
+
+function stopRefreshPolling() {
+    window.clearInterval(refreshTimer)
+    refreshTimer = undefined
+}
+
+async function retryConnection() {
+    loading.value = true
+    const loaded = await refreshData()
+    if (loaded) startRefreshPolling()
+    loading.value = false
 }
 
 async function toggleNotifications() {
     const opening = !showNotifications.value
     showNotifications.value = opening
-    if (!opening || !token.value) return
+    if (!opening || !isAuthenticated.value) return
 
     try {
         await loadNotifications()
@@ -374,14 +427,12 @@ function formatTime(value) {
 }
 
 onMounted(async () => {
-    await refreshData()
-    refreshTimer = window.setInterval(() => {
-        if (token.value) refreshData()
-    }, 12000)
+    const loaded = await refreshData()
+    if (loaded) startRefreshPolling()
 })
 
 onUnmounted(() => {
-    window.clearInterval(refreshTimer)
+    stopRefreshPolling()
     window.clearTimeout(chatSearchTimer)
 })
 </script>
@@ -446,13 +497,22 @@ onUnmounted(() => {
             </aside>
 
             <section class="chat-panel">
-                <div v-if="error" class="inline-error" role="alert">{{ error }}</div>
+                <div v-if="error" class="inline-error" role="alert">
+                    <span>{{ error }}</span>
+                    <button v-if="retryAvailable" type="button" :disabled="loading" @click="retryConnection">
+                        {{ loading ? 'Retrying…' : 'Retry' }}
+                    </button>
+                </div>
                 <template v-if="selectedConversation">
                     <header class="chat-header">
                         <span class="contact-avatar large">{{ selectedConversation.type === 'group' ? 'G' : selectedTitle.slice(0, 1).toUpperCase() }}</span>
                         <div class="chat-heading-copy">
                             <strong>{{ selectedTitle }}</strong>
-                            <small>{{ selectedConversation.type === 'group' ? `${selectedConversation.users?.length || 0} members · ${onlineMemberCount} online` : 'TravelMate' }}</small>
+                            <small v-if="selectedConversation.type === 'group'">{{ selectedConversation.users?.length || 0 }} members · {{ onlineMemberCount }} online</small>
+                            <small v-else class="private-presence">
+                                <span class="presence-dot" :class="{ online: selectedPartner?.is_online }"></span>
+                                {{ selectedPartner?.is_online ? 'Online' : 'Offline' }}
+                            </small>
                             <div v-if="selectedConversation.type === 'group'" class="member-presence" aria-label="Group members and online status">
                                 <span v-for="member in selectedConversation.users" :key="member.id" class="member-presence-item" :title="`${member.name}: ${member.is_online ? 'online' : 'offline'}`">
                                     <span class="presence-dot" :class="{ online: member.is_online }"></span>{{ member.id === currentUser?.id ? 'You' : member.name }}
@@ -478,17 +538,17 @@ onUnmounted(() => {
                 </template>
                 <div v-else class="empty-state">
                     <span class="empty-mark">T</span>
-                    <h2>{{ token ? 'Your travel conversations' : 'Sign in to your messages' }}</h2>
-                    <p>{{ token ? 'Select a conversation or start a new chat.' : 'Connect with your travel companions and plan together.' }}</p>
-                    <button v-if="!token" class="primary-action" @click="showLogin = true">Sign in</button>
+                    <h2>{{ isAuthenticated ? 'Your travel conversations' : 'Sign in to your messages' }}</h2>
+                    <p>{{ isAuthenticated ? 'Select a conversation or start a new chat.' : 'Connect with your travel companions and plan together.' }}</p>
+                    <button v-if="!isAuthenticated" class="primary-action" @click="showLogin = true">Sign in</button>
                     <button v-else class="primary-action" @click="openNewChat">Start a chat</button>
                 </div>
             </section>
         </section>
 
-        <div v-if="showLogin" class="modal-backdrop" @click.self="showLogin = false">
+        <div v-if="showLogin" class="modal-backdrop" @click.self="showLogin = false; pendingNewChat = false">
             <form class="dialog" @submit.prevent="login">
-                <button class="close-button" type="button" aria-label="Close" @click="showLogin = false">×</button>
+            <button class="close-button" type="button" aria-label="Close" @click="showLogin = false; pendingNewChat = false">×</button>
                 <span class="eyebrow">TRAVELMATE ACCOUNT</span><h2>{{ authMode === 'login' ? 'Sign in to Messages' : 'Create your account' }}</h2>
                 <label v-if="authMode === 'register'">Name<input v-model="loginForm.name" autocomplete="name" maxlength="255" required></label>
                 <label>Email<input v-model="loginForm.email" type="email" autocomplete="username" required></label>
@@ -588,6 +648,7 @@ h1, h2, p { margin-top: 0; }
 .chat-header strong { font: 700 14px 'Manrope', sans-serif; }
 .chat-header small { margin-top: 3px; color: #817b72; font-size: 11px; }
 .chat-heading-copy { min-width: 0; }
+.private-presence { display: flex; align-items: center; gap: 6px; }
 .member-presence { display: flex; flex-wrap: wrap; gap: 5px 12px; margin-top: 7px; }
 .member-presence-item { display: inline-flex; align-items: center; gap: 5px; color: #777168; font-size: 10px; }
 .presence-dot { width: 7px; height: 7px; flex: 0 0 auto; border-radius: 50%; background: #aaa49a; }
@@ -609,7 +670,9 @@ h1, h2, p { margin-top: 0; }
 .empty-state h2 { margin-bottom: 8px; font: 700 19px 'Manrope', sans-serif; }
 .empty-state p { max-width: 300px; color: #817b72; font-size: 13px; line-height: 1.55; }
 .primary-action { min-height: 42px; padding: 0 18px; border: 0; border-radius: 9px; background: #22211f; color: #fff; font-weight: 600; }
-.inline-error { margin: 12px 18px 0; padding: 10px 12px; border-radius: 8px; background: #fff0e9; color: #a3401e; font-size: 12px; }
+.inline-error { margin: 12px 18px 0; padding: 10px 12px; display: flex; align-items: center; justify-content: space-between; gap: 12px; border-radius: 8px; background: #fff0e9; color: #a3401e; font-size: 12px; }
+.inline-error button { flex: 0 0 auto; padding: 5px 9px; border: 1px solid #e5b8a7; border-radius: 6px; background: #fff; color: #8d3a20; font-size: 11px; font-weight: 600; }
+.inline-error button:disabled { opacity: .55; cursor: wait; }
 .modal-backdrop { position: fixed; inset: 0; z-index: 5; display: grid; place-items: center; padding: 16px; background: #25221ecc; }
 .dialog { width: min(420px, 100%); max-height: min(620px, 90vh); overflow-y: auto; position: relative; padding: 27px; border-radius: 14px; background: white; box-shadow: 0 20px 70px #0003; }
 .dialog h2 { margin: 5px 32px 22px 0; font: 800 21px 'Manrope', sans-serif; }

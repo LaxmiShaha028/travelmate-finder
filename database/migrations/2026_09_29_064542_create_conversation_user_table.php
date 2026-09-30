@@ -10,15 +10,23 @@ return new class extends Migration
      * Run the migrations.
      */
     public function up(): void
-    {
-        Schema::create('conversation_user', function (Blueprint $table) {
-            $table->id();
-            $table->foreignId('conversation_id')->constrained()->cascadeOnDelete();
-            $table->foreignId('user_id')->constrained()->cascadeOnDelete();
-            $table->timestamp('last_read_at')->nullable();
-            $table->timestamps();
-        });
-    }
+{
+    Schema::create('conversation_user', function (Blueprint $table) {
+        $table->id();
+
+        $table->foreignId('conversation_id')
+              ->constrained()
+              ->cascadeOnDelete();
+
+        $table->foreignId('user_id')
+              ->constrained()
+              ->cascadeOnDelete();
+
+        $table->timestamps();
+
+        $table->unique(['conversation_id', 'user_id']);
+    });
+}
 
     /**
      * Reverse the migrations.
