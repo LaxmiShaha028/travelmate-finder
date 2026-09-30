@@ -57,6 +57,16 @@ test('invalid filters return validation errors and upper-only budgets work', fun
     $this->getJson('/api/travelers?max_age=24')->assertOk();
 });
 
+test('oversized discovery page sizes are capped at fifty', function () {
+    $this->getJson('/api/travelers?per_page=999')
+        ->assertOk()
+        ->assertJsonPath('meta.per_page', 50);
+
+    $this->getJson('/api/trips?per_page=999')
+        ->assertOk()
+        ->assertJsonPath('meta.per_page', 50);
+});
+
 test('trip creation ownership visibility filters and dynamic statistics', function () {
     $owner = discoveryUser();
     $other = discoveryUser();

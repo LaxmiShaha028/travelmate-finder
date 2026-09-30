@@ -4,10 +4,12 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\Conversation;
+use App\Models\Message;
 use App\Notifications\ChatMessageNotification;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Database\QueryException;
 use Illuminate\Validation\Rule;
 
 class ChatController extends Controller
@@ -104,14 +106,15 @@ class ChatController extends Controller
         ]);
 
         $conversation = $request->user()->conversations()->findOrFail($validated['conversation_id']);
-        $message = $conversation->messages()->create([
-            'sender_id' => $request->user()->id,
-            'message' => $validated['message'],
-        ]);
-        $conversation->users()
-            ->whereKeyNot($request->user()->id)
-            ->get()
-            ->each(fn ($recipient) => $recipient->notify(new ChatMessageNotification($message)));
+        $message = Message::createForSender($conversation, $request->user(), $validated['message']);
+        try {
+            $conversation->users()
+                ->whereKeyNot($request->user()->id)
+                ->get()
+                ->each(fn ($recipient) => $recipient->notify(new ChatMessageNotification($message)));
+        } catch (QueryException $exception) {
+            report($exception);
+        }
         $conversation->touch();
 
         return response()->json($message->load('sender:id,name'), 201);

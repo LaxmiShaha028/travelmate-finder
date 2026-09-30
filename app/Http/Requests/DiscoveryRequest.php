@@ -6,6 +6,17 @@ use Illuminate\Foundation\Http\FormRequest;
 
 class DiscoveryRequest extends FormRequest
 {
+    protected function prepareForValidation(): void
+    {
+        $perPage = $this->input('per_page');
+
+        if ((is_int($perPage) || is_string($perPage))
+            && filter_var($perPage, FILTER_VALIDATE_INT) !== false
+            && (int) $perPage > 50) {
+            $this->merge(['per_page' => 50]);
+        }
+    }
+
     public function authorize(): bool
     {
         return true;

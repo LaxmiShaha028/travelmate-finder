@@ -143,6 +143,30 @@ class ConversationController extends Controller
         ]);
     }
 
+    public function destroy(Request $request, Conversation $conversation)
+    {
+        $isMember = $conversation->users()
+            ->where('users.id', $request->user()->id)
+            ->exists();
+
+        if (! $isMember) {
+            return response()->json([
+                'success' => false,
+                'message' => 'You are not a member of this conversation.',
+            ], 403);
+        }
+
+        DB::transaction(function () use ($conversation, $request) {
+            $conversation->users()->detach($request->user()->id);
+
+            if (! $conversation->users()->exists()) {
+                $conversation->delete();
+            }
+        });
+
+        return response()->json(['success' => true]);
+    }
+
     private function attachPresence(Conversation $conversation): Conversation
     {
         $conversation->users->each(fn ($user) => $user->setAttribute(

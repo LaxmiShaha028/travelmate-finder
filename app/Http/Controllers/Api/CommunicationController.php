@@ -42,11 +42,18 @@ class CommunicationController extends Controller
     public function users(Request $request)
     {
         $search = trim((string) $request->query('search', ''));
+        $searchTerms = array_values(array_filter(preg_split('/\s+/', mb_strtolower($search)) ?: []));
 
-        $users = User::query()
+        $users = User::discoverable()
             ->select(['id', 'name'])
             ->whereKeyNot($request->user()->id)
-            ->when($search !== '', fn ($query) => $query->where('name', 'like', '%'.$search.'%'))
+            ->when($searchTerms, function ($query) use ($searchTerms) {
+                $query->where(function ($query) use ($searchTerms) {
+                    foreach ($searchTerms as $term) {
+                        $query->whereRaw('LOWER(name) LIKE ?', ['%'.$term.'%']);
+                    }
+                });
+            })
             ->orderBy('name')
             ->limit(20)
             ->get()

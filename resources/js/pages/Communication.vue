@@ -8,6 +8,25 @@ const api = axios.create({
     withCredentials: true,
     withXSRFToken: true,
 })
+const csrfCookieUrl = new URL('/sanctum/csrf-cookie', new URL(
+    import.meta.env.VITE_API_BASE_URL || '/api',
+    window.location.origin,
+)).toString()
+let csrfCookieRequest
+
+function ensureCsrfCookie() {
+    if (!csrfCookieRequest) {
+        csrfCookieRequest = axios.get(csrfCookieUrl, {
+            withCredentials: true,
+            withXSRFToken: true,
+        }).catch((exception) => {
+            csrfCookieRequest = null
+            throw exception
+        })
+    }
+
+    return csrfCookieRequest
+}
 
 const token = ref(localStorage.getItem('travelmate_token') || '')
 const currentUser = ref(usePage().props.auth?.user || null)
@@ -50,10 +69,26 @@ function apiErrorMessage(exception, fallback) {
 
 api.interceptors.request.use((config) => {
     if (token.value) config.headers.Authorization = `Bearer ${token.value}`
+    const method = (config.method || 'get').toLowerCase()
+    if (['post', 'put', 'patch', 'delete'].includes(method)) {
+        return ensureCsrfCookie().then(() => config)
+    }
     return config
 })
 
-api.interceptors.response.use((response) => response, (exception) => {
+api.interceptors.response.use((response) => response, async (exception) => {
+    if (exception.response?.status === 419 && exception.config && !exception.config._csrfRetried) {
+        exception.config._csrfRetried = true
+        csrfCookieRequest = null
+
+        try {
+            await ensureCsrfCookie()
+            return api.request(exception.config)
+        } catch {
+            return Promise.reject(exception)
+        }
+    }
+
     if (exception.response?.status === 401 && isAuthenticated.value) {
         token.value = ''
         currentUser.value = null
@@ -97,6 +132,10 @@ const selectedPartner = computed(() => selectedConversation.value?.users
 
 const onlineMemberCount = computed(() => selectedConversation.value?.users
     ?.filter((user) => user.is_online).length || 0)
+
+function messageBody(message) {
+    return message.message || message.text || message.body || message.content || ''
+}
 
 watch(search, (value) => {
     window.clearTimeout(chatSearchTimer)
@@ -201,19 +240,26 @@ async function openNewChat() {
     await loadContacts()
 }
 
-async function startConversation(user) {
+function selectContact(user) {
     if (newChatType.value === 'group') {
         selectedContactIds.value = selectedContactIds.value.includes(user.id)
             ? selectedContactIds.value.filter((id) => id !== user.id)
             : [...selectedContactIds.value, user.id]
         return
     }
+    selectedContactIds.value = [user.id]
+}
+
+async function createPrivateConversation() {
+    const userId = selectedContactIds.value[0]
+    if (!userId) return
+
     loading.value = true
     error.value = ''
     try {
         const { data: response } = await api.post('/conversations', {
-            user_id: user.id,
-            user_ids: [user.id],
+            user_id: userId,
+            user_ids: [userId],
         })
         const data = response.data || response
         await loadConversations()
@@ -411,7 +457,9 @@ async function openNotification(notification) {
 }
 
 function signOut() {
-    api.post('/logout').catch(() => {})
+    api.post('/logout').catch(() => {}).finally(() => {
+        csrfCookieRequest = null
+    })
     token.value = ''
     currentUser.value = null
     conversations.value = []
@@ -526,7 +574,7 @@ onUnmounted(() => {
                             <span v-if="selectedConversation.type === 'group' || message.sender_id !== currentUser?.id" class="message-sender">
                                 {{ message.sender_id === currentUser?.id ? 'You' : message.sender?.name }}
                             </span>
-                            <p>{{ message.message }}</p><time>{{ formatTime(message.created_at) }}</time>
+                            <p>{{ messageBody(message) }}</p><time>{{ formatTime(message.created_at) }}</time>
                         </article>
                     </div>
                     <form class="composer" @submit.prevent="sendMessage">
@@ -562,31 +610,58 @@ onUnmounted(() => {
             </form>
         </div>
 
-        <div v-if="showNewChat" class="modal-backdrop" @click.self="showNewChat = false">
-            <section class="dialog contact-dialog">
-                <button class="close-button" aria-label="Close" @click="showNewChat = false">×</button>
-                <span class="eyebrow">NEW CONVERSATION</span><h2>Find a travel mate</h2>
-                <div class="filter-tabs modal-tabs" role="tablist" aria-label="Conversation type">
-                    <button :class="{ active: newChatType === 'private' }" @click="newChatType = 'private'; selectedContactIds = []">Private</button>
-                    <button :class="{ active: newChatType === 'group' }" @click="newChatType = 'group'; selectedContactIds = []">Group</button>
-                </div>
-                <label v-if="newChatType === 'group'" class="group-name-field">Group name
-                    <input v-model="groupName" maxlength="255" placeholder="e.g. Cox's Bazar weekend">
-                </label>
-                <label class="search-box dialog-search">
-                    <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m16 16 4 4"/></svg>
-                    <input v-model="contactSearch" placeholder="Search travelers by name..." aria-label="Search travelers" @input="loadContacts">
-                </label>
-                <div class="contact-results">
-                    <button v-for="contact in contacts" :key="contact.id" class="contact-result" :class="{ chosen: selectedContactIds.includes(contact.id) }" :disabled="loading" @click="startConversation(contact)">
-                        <span class="contact-avatar">{{ contact.name.slice(0, 1).toUpperCase() }}</span><span>{{ contact.name }}</span><span class="result-arrow">→</span>
+        <div v-if="showNewChat" class="modal-backdrop new-chat-backdrop" @click.self="showNewChat = false">
+            <section class="new-chat-panel" role="dialog" aria-modal="true" aria-labelledby="new-chat-title">
+                <header class="new-chat-header">
+                    <button class="new-chat-back" type="button" aria-label="Back" @click="showNewChat = false">
+                        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 18-6-6 6-6"/><path d="M9 12h11"/></svg>
                     </button>
-                    <p v-if="!contacts.length" class="empty-list">No travelers found.</p>
+                    <div>
+                        <span class="eyebrow">COMMUNICATION</span>
+                        <h2 id="new-chat-title">{{ newChatType === 'group' ? 'New group' : 'New chat' }}</h2>
+                    </div>
+                    <button class="new-chat-menu" type="button" aria-label="Close new chat" @click="showNewChat = false">×</button>
+                </header>
+
+                <div class="new-chat-content">
+                    <button v-if="newChatType === 'private'" class="new-group-action" type="button" @click="newChatType = 'group'; selectedContactIds = []; groupName = ''">
+                        <span class="new-group-icon" aria-hidden="true">
+                            <svg viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="10" cy="7" r="4"/><path d="M20 8v6M17 11h6"/></svg>
+                        </span>
+                        <span><strong>New group</strong><small>Start a group conversation</small></span>
+                        <span class="new-chat-chevron" aria-hidden="true">›</span>
+                    </button>
+
+                    <label v-if="newChatType === 'group'" class="group-name-field">Group name
+                        <input v-model="groupName" maxlength="255" placeholder="e.g. Cox's Bazar weekend">
+                    </label>
+
+                    <label class="search-box dialog-search">
+                        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m16 16 4 4"/></svg>
+                        <input v-model="contactSearch" placeholder="Search name or username" aria-label="Search travelers" @input="loadContacts">
+                    </label>
+
+                    <p v-if="newChatType === 'group'" class="selection-hint">Add people to this group</p>
+                    <div class="contact-results">
+                        <button v-for="contact in contacts" :key="contact.id" class="contact-result" :class="{ chosen: selectedContactIds.includes(contact.id) }" :disabled="loading" @click="selectContact(contact)">
+                            <span class="contact-avatar">{{ contact.name.slice(0, 1).toUpperCase() }}</span>
+                            <span class="contact-details"><strong>{{ contact.name }}</strong><small>{{ contact.is_online ? 'Online' : 'TravelMate member' }}</small></span>
+                            <span v-if="newChatType === 'group' && selectedContactIds.includes(contact.id)" class="contact-selected" aria-label="Selected">✓</span>
+                            <span v-else-if="newChatType === 'private'" class="new-chat-chevron" aria-hidden="true">›</span>
+                        </button>
+                        <p v-if="!contacts.length" class="empty-list">No travelers found.</p>
+                    </div>
                 </div>
-                <button v-if="newChatType === 'group'" class="primary-action create-group-button" :disabled="loading || !groupName.trim() || !selectedContactIds.length" @click="createGroupConversation">
-                    {{ loading ? 'Creating group...' : `Create group (${selectedContactIds.length} selected)` }}
-                </button>
-                <p v-if="error" class="form-error">{{ error }}</p>
+
+                <footer class="new-chat-footer">
+                    <p v-if="error" class="form-error">{{ error }}</p>
+                    <button v-if="newChatType === 'private'" class="primary-action" :disabled="loading || !selectedContactIds.length" @click="createPrivateConversation">
+                        {{ loading ? 'Starting chat...' : 'Start chat' }}
+                    </button>
+                    <button v-else class="primary-action" :disabled="loading || !groupName.trim() || !selectedContactIds.length" @click="createGroupConversation">
+                        {{ loading ? 'Creating group...' : `Create group (${selectedContactIds.length})` }}
+                    </button>
+                </footer>
             </section>
         </div>
     </main>
@@ -691,7 +766,41 @@ h1, h2, p { margin-top: 0; }
 .contact-result.chosen { background: #f5f1e9; }
 .contact-result .result-arrow { margin-left: auto; color: #dd6739; font-size: 18px; }
 .create-group-button { width: 100%; margin-top: 13px; }
+.new-chat-backdrop { background: #171a18a8; }
+.new-chat-panel { width: min(560px, 100%); height: min(720px, calc(100vh - 32px)); display: flex; flex-direction: column; overflow: hidden; border: 1px solid #e8e3db; border-radius: 14px; background: #fff; box-shadow: 0 24px 70px #0003; }
+.new-chat-header { min-height: 78px; padding: 13px 22px; display: grid; grid-template-columns: 40px minmax(0, 1fr) 36px; align-items: center; gap: 12px; border-bottom: 1px solid #eeeae4; }
+.new-chat-back, .new-chat-menu { width: 36px; height: 36px; display: grid; place-items: center; border: 0; border-radius: 50%; background: transparent; color: #262522; }
+.new-chat-back:hover, .new-chat-menu:hover { background: #f4f1ec; }
+.new-chat-back svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.new-chat-menu { font-size: 25px; }
+.new-chat-header h2 { margin: 2px 0 0; font: 700 19px 'Manrope', sans-serif; }
+.new-chat-content { min-height: 0; flex: 1; display: flex; flex-direction: column; padding: 17px 20px 8px; }
+.new-group-action { width: 100%; min-height: 74px; margin-bottom: 14px; padding: 8px; display: flex; align-items: center; gap: 13px; border: 0; border-radius: 10px; background: transparent; color: #282622; text-align: left; }
+.new-group-action:hover { background: #f6f3ee; }
+.new-group-icon { width: 48px; height: 48px; flex: 0 0 auto; display: grid; place-items: center; border-radius: 50%; background: #df6738; color: #fff; }
+.new-group-icon svg { width: 23px; height: 23px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.new-group-action strong, .new-group-action small, .contact-details strong, .contact-details small { display: block; }
+.new-group-action strong, .contact-details strong { font-size: 13px; }
+.new-group-action small, .contact-details small { margin-top: 4px; color: #817b72; font-size: 11px; }
+.new-chat-chevron { margin-left: auto; color: #8a847b; font-size: 24px; }
+.new-chat-content .group-name-field { margin: 0 0 12px; }
+.new-chat-content .dialog-search { height: 46px; margin: 0 0 12px; border-radius: 24px; background: #f6f4f0; }
+.selection-hint { margin: 2px 8px 8px; color: #817b72; font-size: 11px; }
+.contact-results { min-height: 0; flex: 1; max-height: none; margin: 0 -8px; overflow-y: auto; }
+.contact-result { min-height: 68px; padding: 9px 10px; gap: 13px; border-bottom: 0; border-radius: 9px; }
+.contact-result:hover, .contact-result.chosen { background: #f5f2ed; }
+.contact-result .contact-avatar { width: 46px; height: 46px; }
+.contact-details { min-width: 0; flex: 1; }
+.contact-selected { width: 23px; height: 23px; display: grid; place-items: center; border-radius: 50%; background: #df6738; color: white; font-size: 13px; }
+.new-chat-footer { padding: 12px 20px 18px; border-top: 1px solid #eeeae4; }
+.new-chat-footer .primary-action { width: 100%; }
+.new-chat-footer .form-error { margin: 0 0 10px; }
 @media (max-width: 720px) {
+    .new-chat-backdrop { padding: 0; }
+    .new-chat-panel { width: 100%; height: 100dvh; max-height: none; border: 0; border-radius: 0; }
+    .new-chat-header { min-height: 68px; padding: 10px 14px; }
+    .new-chat-content { padding: 14px 14px 6px; }
+    .new-chat-footer { padding: 10px 14px max(14px, env(safe-area-inset-bottom)); }
     .topbar { height: 60px; padding: 0 16px; }
     .messenger-shell { width: 100%; height: calc(100dvh - 60px); min-height: 0; max-height: none; margin: 0; grid-template-columns: minmax(108px, 34%) minmax(0, 1fr); border: 0; border-radius: 0; }
     .sidebar-heading { padding: 17px 11px 13px; }

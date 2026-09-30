@@ -7,6 +7,7 @@ use App\Models\Conversation;
 use App\Models\Message;
 use App\Notifications\ChatMessageNotification;
 use Illuminate\Http\Request;
+use Illuminate\Database\QueryException;
 
 class MessageController extends Controller
 {
@@ -30,17 +31,17 @@ class MessageController extends Controller
             'message' => ['required', 'string', 'max:5000'],
         ]);
 
-        $message = Message::create([
-            'conversation_id' => $conversation->id,
-            'sender_id' => $request->user()->id,
-            'message' => $validated['message'],
-        ]);
+        $message = Message::createForSender($conversation, $request->user(), $validated['message']);
 
         $message->load('sender:id,name');
-        $conversation->users()
-            ->whereKeyNot($request->user()->id)
-            ->get()
-            ->each(fn ($recipient) => $recipient->notify(new ChatMessageNotification($message)));
+        try {
+            $conversation->users()
+                ->whereKeyNot($request->user()->id)
+                ->get()
+                ->each(fn ($recipient) => $recipient->notify(new ChatMessageNotification($message)));
+        } catch (QueryException $exception) {
+            report($exception);
+        }
         $conversation->touch();
 
         return response()->json([
