@@ -46,12 +46,15 @@ class AuthController extends Controller
         }
 
         $user = Auth::user();
+        $user->load('travelPreference');
 
         $token = $user->createToken('travelmate')->plainTextToken;
 
         return response()->json([
             'message' => 'Login successful',
-            'user' => $user,
+            'user' => array_merge($user->toArray(), [
+                'has_preferences' => $user->travelPreference !== null,
+            ]),
             'token' => $token,
         ]);
     }
