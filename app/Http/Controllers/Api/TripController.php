@@ -32,7 +32,7 @@ class TripController extends Controller
             }
         }
 
-        return TripResource::collection($q->orderBy('start_date')->orderBy('id')->paginate($f['per_page'] ?? 12)->withQueryString());
+        return TripResource::collection($q->byStartDate()->paginate($f['per_page'] ?? 12)->withQueryString());
     }
 
     public function show(Request $request, Trip $trip)
@@ -48,7 +48,7 @@ class TripController extends Controller
     {
         $request->validate(['page' => 'sometimes|integer|min:1']);
 
-        return TripResource::collection($request->user()->trips()->with('user')->latest('id')->paginate(12));
+        return TripResource::collection($request->user()->trips()->with('user')->byStartDate()->paginate(12));
     }
 
     public function store(Request $request)

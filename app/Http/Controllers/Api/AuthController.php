@@ -83,7 +83,7 @@ class AuthController extends Controller
     {
         $rules = [];
         foreach (['destination', 'date', 'budget', 'style', 'companions', 'interests'] as $key) {
-            $rules[$key] = 'required|string|max:255';
+            $rules[$key] = ['bail', 'required', 'string', 'max:255', new \App\Rules\PreferenceAnswer];
         }
         $data = $request->validate($rules + [
             'travel_start' => 'nullable|date_format:Y-m-d|required_with:travel_end',

@@ -25,4 +25,12 @@ class Trip extends Model
     {
         return $query->where('status', 'open')->whereHas('user', fn ($q) => $q->discoverable());
     }
+
+    public function scopeByStartDate($query)
+    {
+        return $query
+            ->orderByRaw('CASE WHEN start_date >= ? THEN 0 ELSE 1 END', [now('Asia/Dhaka')->toDateString()])
+            ->orderBy('start_date')
+            ->orderBy('id');
+    }
 }

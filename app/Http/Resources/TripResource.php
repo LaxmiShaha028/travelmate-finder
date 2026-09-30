@@ -11,6 +11,7 @@ class TripResource extends JsonResource
         return [
             'id' => $this->id,
             'title' => $this->title,
+            'created_at' => $this->created_at?->toISOString(),
             'destination' => $this->destination,
             'description' => $this->description,
             'start_date' => $this->start_date->format('Y-m-d'),
