@@ -70,6 +70,9 @@ class TripController extends Controller
             if (isset($data['max_travelers']) && $data['max_travelers'] < $trip->travelRequests()->where('status', 'accepted')->count()) {
                 throw ValidationException::withMessages(['max_travelers' => 'Remove accepted travelers before reducing the number of places.']);
             }
+            if ($trip->status === 'hidden') {
+                $data['status'] = 'hidden';
+            }
             $trip->update($data);
 
             return new TripResource(Trip::with('user')->withRequestSummary($request->user()->id)->findOrFail($trip->id));
@@ -79,6 +82,10 @@ class TripController extends Controller
     private function validateTrip(Request $request, ?Trip $trip = null): array
     {
         $required = $trip ? 'sometimes' : 'required';
+        $statuses = ['draft', 'open', 'completed', 'cancelled'];
+        if ($trip?->status === 'hidden') {
+            $statuses[] = 'hidden';
+        }
         $data = $request->validate([
             'title' => "$required|string|max:255",
             'destination' => "$required|string|max:255",
@@ -88,7 +95,7 @@ class TripController extends Controller
             'budget' => "$required|numeric|min:0|max:99999999",
             'travel_style' => 'nullable|string|max:255',
             'max_travelers' => 'sometimes|integer|min:1|max:100',
-            'status' => ['sometimes', Rule::in(['draft', 'open', 'completed', 'cancelled'])],
+            'status' => ['sometimes', Rule::in($statuses)],
         ]);
         $start = Carbon::parse($data['start_date'] ?? $trip->start_date)->startOfDay();
         $end = Carbon::parse($data['end_date'] ?? $trip->end_date)->startOfDay();

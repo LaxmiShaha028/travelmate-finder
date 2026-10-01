@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\User;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Hash;
 
 class AuthController extends Controller
 {
@@ -21,6 +22,9 @@ class AuthController extends Controller
             'name' => $request->name,
             'email' => $request->email,
             'password' => bcrypt($request->password),
+            'role' => 'user',
+            'is_blocked' => false,
+            'verification_status' => 'unverified',
         ]);
 
         $token = $user->createToken('travelmate')->plainTextToken;
@@ -34,18 +38,30 @@ class AuthController extends Controller
 
     public function login(Request $request)
     {
+        return $this->authenticate($request);
+    }
+
+    public function adminLogin(Request $request)
+    {
+        return $this->authenticate($request, true);
+    }
+
+    private function authenticate(Request $request, bool $adminOnly = false)
+    {
         $credentials = $request->validate([
             'email' => 'required|email',
             'password' => 'required',
         ]);
 
-        if (! Auth::attempt($credentials)) {
+        $user = User::where('email', $credentials['email'])->first();
+        if (! $user || ! Hash::check($credentials['password'], $user->password)) {
             return response()->json([
                 'message' => 'Invalid email or password',
             ], 401);
         }
 
-        $user = Auth::user();
+        abort_if($user->is_blocked, 403, 'Your account is blocked.');
+        abort_if($adminOnly && $user->role !== 'admin', 403, 'This account does not have admin access.');
         $user->load('travelPreference');
 
         $token = $user->createToken('travelmate')->plainTextToken;

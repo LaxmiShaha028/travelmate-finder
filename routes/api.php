@@ -26,8 +26,26 @@ Route::get('/filter-options', [DiscoveryController::class, 'filters']);
 // Authentication
 Route::post('/register', [AuthController::class, 'register']);
 Route::post('/login', [AuthController::class, 'login']);
+Route::post('/admin/login', [AuthController::class, 'adminLogin'])->middleware('throttle:5,1');
 
-Route::middleware('auth:sanctum')->group(function () {
+Route::middleware(['auth:sanctum', \App\Http\Middleware\EnsureActiveUser::class])->group(function () {
+
+    Route::post('/reports', [\App\Http\Controllers\Api\ModerationController::class, 'report'])->middleware('throttle:10,1');
+    Route::get('/user/verification', [\App\Http\Controllers\Api\ModerationController::class, 'verification']);
+    Route::post('/user/verification', [\App\Http\Controllers\Api\ModerationController::class, 'requestVerification'])->middleware('throttle:5,1');
+
+    Route::prefix('admin')->middleware(\App\Http\Middleware\EnsureAdmin::class)->group(function () {
+        Route::get('/overview', [\App\Http\Controllers\Api\AdminController::class, 'overview']);
+        Route::get('/users', [\App\Http\Controllers\Api\AdminController::class, 'users']);
+        Route::patch('/users/{user}', [\App\Http\Controllers\Api\AdminController::class, 'updateUser']);
+        Route::get('/trips', [\App\Http\Controllers\Api\AdminController::class, 'trips']);
+        Route::patch('/trips/{trip}', [\App\Http\Controllers\Api\AdminController::class, 'updateTrip']);
+        Route::delete('/trips/{trip}', [\App\Http\Controllers\Api\AdminController::class, 'deleteTrip']);
+        Route::get('/reports', [\App\Http\Controllers\Api\AdminController::class, 'reports']);
+        Route::patch('/reports/{report}', [\App\Http\Controllers\Api\AdminController::class, 'updateReport']);
+        Route::get('/verifications', [\App\Http\Controllers\Api\AdminController::class, 'verifications']);
+        Route::patch('/verifications/{verification}', [\App\Http\Controllers\Api\AdminController::class, 'updateVerification']);
+    });
 
     // User / Profile
     Route::get('/user', [AuthController::class, 'user']);
