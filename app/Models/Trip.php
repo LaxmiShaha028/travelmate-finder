@@ -6,6 +6,19 @@ use Illuminate\Database\Eloquent\Model;
 
 class Trip extends Model
 {
+    public function travelRequests()
+    {
+        return $this->hasMany(TravelRequest::class);
+    }
+
+    public function scopeWithRequestSummary($query, ?int $userId)
+    {
+        return $query->withCount([
+            'travelRequests as accepted_count' => fn ($q) => $q->where('status', 'accepted'),
+            'travelRequests',
+        ])->with(['travelRequests' => fn ($q) => $q->where('user_id', $userId)]);
+    }
+
     protected $fillable = [
         'title', 'destination', 'description', 'start_date', 'end_date',
         'duration_days', 'budget', 'travel_style', 'max_travelers', 'status',
@@ -24,5 +37,13 @@ class Trip extends Model
     public function scopeVisible($query)
     {
         return $query->where('status', 'open')->whereHas('user', fn ($q) => $q->discoverable());
+    }
+
+    public function scopeByStartDate($query)
+    {
+        return $query
+            ->orderByRaw('CASE WHEN start_date >= ? THEN 0 ELSE 1 END', [now('Asia/Dhaka')->toDateString()])
+            ->orderBy('start_date')
+            ->orderBy('id');
     }
 }

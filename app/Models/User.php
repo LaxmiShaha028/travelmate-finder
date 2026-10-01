@@ -17,6 +17,13 @@ class User extends Authenticatable
 
     protected $appends = ['profile_photo_url'];
 
+    // Match database defaults before a newly created account is reloaded.
+    protected $attributes = [
+        'role' => 'user',
+        'is_blocked' => false,
+        'verification_status' => 'unverified',
+    ];
+
     public function getProfilePhotoUrlAttribute(): ?string
     {
         return $this->profile_photo

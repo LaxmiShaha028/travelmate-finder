@@ -1,0 +1,148 @@
+<?php
+
+use App\Models\Report;
+use App\Models\User;
+use App\Models\VerificationRequest;
+use Laravel\Sanctum\Sanctum;
+
+function adminTrip(User $owner)
+{
+    return $owner->trips()->create([
+        'title' => 'Admin test trip', 'destination' => 'Sylhet', 'start_date' => today()->addDay(),
+        'end_date' => today()->addDays(3), 'duration_days' => 3, 'budget' => 5000, 'max_travelers' => 2, 'status' => 'open',
+    ]);
+}
+
+test('every admin endpoint rejects guests and regular users', function () {
+    $endpoints = [
+        ['get', '/overview'], ['get', '/users'], ['get', '/trips'], ['get', '/reports'], ['get', '/verifications'],
+        ['patch', '/users/1'], ['patch', '/trips/1'], ['delete', '/trips/1'], ['patch', '/reports/1'], ['patch', '/verifications/1'],
+    ];
+    $user = User::factory()->create(['role' => 'user']);
+    adminTrip($user);
+    Report::create(['reporter_id' => $user->id, 'target_type' => 'trip', 'target_id' => 1, 'reason' => 'A report for access testing']);
+    VerificationRequest::create(['user_id' => $user->id, 'details' => 'Profile details for verification testing']);
+    foreach ($endpoints as [$method, $path]) {
+        $this->{$method.'Json'}('/api/admin'.$path)->assertUnauthorized();
+    }
+    Sanctum::actingAs($user);
+    foreach ($endpoints as [$method, $path]) {
+        $this->{$method.'Json'}('/api/admin'.$path)->assertForbidden();
+    }
+});
+
+test('normal login supports database assigned admins without granting signup privileges', function () {
+    $admin = User::factory()->create(['role' => 'admin']);
+    $this->postJson('/api/login', ['email' => $admin->email, 'password' => 'password'])->assertOk()->assertJsonPath('user.role', 'admin');
+    $user = User::factory()->create(['role' => 'user']);
+    $this->postJson('/api/admin/login', ['email' => $user->email, 'password' => 'password'])->assertForbidden();
+    expect($user->tokens()->count())->toBe(0);
+    $this->postJson('/api/register', ['name' => 'Normal signup', 'email' => 'signup@example.test', 'password' => 'password', 'password_confirmation' => 'password', 'role' => 'admin', 'verification_status' => 'verified'])
+        ->assertCreated()->assertJsonPath('user.role', 'user')->assertJsonPath('user.verification_status', 'unverified');
+    $admin->update(['is_blocked' => true]);
+    $this->postJson('/api/login', ['email' => $admin->email, 'password' => 'password'])->assertForbidden();
+    Sanctum::actingAs($admin);
+    $this->getJson('/api/admin/overview')->assertForbidden();
+});
+
+test('admins can search block and unblock users without changing roles', function () {
+    $admin = User::factory()->create(['role' => 'admin']);
+    $user = User::factory()->create(['name' => 'Manage Traveler', 'role' => 'user']);
+    $user->createToken('existing');
+    Sanctum::actingAs($admin);
+    $this->getJson('/api/admin/users?search=Manage')->assertOk()->assertJsonPath('total', 1)->assertJsonPath('data.0.id', $user->id);
+    $this->patchJson('/api/admin/users/'.$user->id, ['is_blocked' => true, 'role' => 'admin'])->assertOk();
+    expect($user->fresh()->is_blocked)->toBeTrue();
+    expect($user->fresh()->role)->toBe('user');
+    expect($user->tokens()->count())->toBe(0);
+    $this->patchJson('/api/admin/users/'.$admin->id, ['is_blocked' => true])->assertUnprocessable();
+    Sanctum::actingAs($user->fresh());
+    $this->getJson('/api/user')->assertForbidden();
+    Sanctum::actingAs($admin);
+    $this->patchJson('/api/admin/users/'.$user->id, ['is_blocked' => false])->assertOk();
+    expect($user->fresh()->is_blocked)->toBeFalse();
+});
+
+test('admins manage trips and analytics reflect the actual database', function () {
+    $admin = User::factory()->create(['role' => 'admin']);
+    $user = User::factory()->create(['role' => 'user']);
+    $trip = adminTrip($user);
+    $trip->travelRequests()->create(['user_id' => $admin->id, 'status' => 'accepted']);
+    Sanctum::actingAs($admin);
+    $this->getJson('/api/admin/overview')->assertOk()->assertJsonPath('data.users', 1)->assertJsonPath('data.trips', 1)->assertJsonPath('data.accepted_requests', 1)->assertJsonCount(6, 'data.months');
+    $this->getJson('/api/admin/trips?search=Sylhet&status=open')->assertOk()->assertJsonPath('total', 1);
+    $this->patchJson('/api/admin/trips/'.$trip->id, ['status' => 'cancelled'])->assertOk();
+    $this->getJson('/api/trips')->assertJsonPath('meta.total', 0);
+    $this->patchJson('/api/admin/trips/'.$trip->id, ['status' => 'invalid'])->assertUnprocessable();
+    $this->deleteJson('/api/admin/trips/'.$trip->id)->assertNoContent();
+    $this->assertDatabaseCount('travel_requests', 0);
+    $this->getJson('/api/admin/overview')->assertJsonPath('data.trips', 0);
+});
+
+test('reports can be submitted and acted on only by admins', function () {
+    $reporter = User::factory()->create(['role' => 'user']);
+    $owner = User::factory()->create(['role' => 'user']);
+    $admin = User::factory()->create(['role' => 'admin']);
+    $trip = adminTrip($owner);
+    Sanctum::actingAs($reporter);
+    $input = ['target_type' => 'trip', 'target_id' => $trip->id, 'reason' => 'The trip information is misleading.'];
+    $this->postJson('/api/reports', $input + ['status' => 'resolved'])->assertCreated()->assertJsonPath('data.status', 'pending');
+    $this->postJson('/api/reports', $input)->assertCreated();
+    $this->assertDatabaseCount('reports', 1);
+    $this->postJson('/api/reports', ['target_type' => 'user', 'target_id' => $reporter->id, 'reason' => 'Cannot report myself'])->assertUnprocessable();
+    $report = Report::first();
+    Sanctum::actingAs($admin);
+    $this->getJson('/api/admin/reports?status=pending')->assertOk()->assertJsonPath('total', 1);
+    $this->patchJson('/api/admin/reports/'.$report->id, ['status' => 'resolved'])->assertOk();
+    expect($report->fresh()->reviewed_by)->toBe($admin->id);
+    expect($trip->fresh()->status)->toBe('hidden');
+    $this->getJson('/api/trips')->assertJsonPath('meta.total', 0);
+    $this->getJson('/api/admin/trips?status=hidden')->assertJsonPath('total', 1);
+    Sanctum::actingAs($owner);
+    $this->patchJson('/api/trips/'.$trip->id, ['status' => 'open'])->assertOk()->assertJsonPath('data.status', 'hidden');
+    Sanctum::actingAs($admin);
+    $this->patchJson('/api/admin/reports/'.$report->id, ['status' => 'dismissed'])->assertStatus(409);
+});
+
+test('resolving a user report bans the account and revokes its tokens', function () {
+    $reporter = User::factory()->create(['role' => 'user']);
+    $reportedUser = User::factory()->create(['role' => 'user']);
+    $admin = User::factory()->create(['role' => 'admin']);
+    $reportedUser->createToken('session');
+
+    Sanctum::actingAs($reporter);
+    $report = Report::create([
+        'reporter_id' => $reporter->id,
+        'target_type' => 'user',
+        'target_id' => $reportedUser->id,
+        'reason' => 'This account is abusive.',
+        'status' => 'pending',
+    ]);
+
+    Sanctum::actingAs($admin);
+    $this->patchJson('/api/admin/reports/'.$report->id, ['status' => 'resolved'])->assertOk();
+
+    expect($reportedUser->fresh()->is_blocked)->toBeTrue()
+        ->and($reportedUser->tokens()->count())->toBe(0);
+});
+
+test('verification approval and rejection update the user profile and allow resubmission', function () {
+    $user = User::factory()->create(['role' => 'user', 'verification_status' => 'unverified']);
+    $admin = User::factory()->create(['role' => 'admin']);
+    Sanctum::actingAs($user);
+    $this->postJson('/api/user/verification', ['details' => 'Please review my completed travel profile.'])->assertCreated();
+    expect($user->fresh()->verification_status)->toBe('pending');
+    $this->postJson('/api/user/verification', ['details' => 'Duplicate verification request details'])->assertStatus(409);
+    $verification = VerificationRequest::first();
+    Sanctum::actingAs($admin);
+    $this->getJson('/api/admin/verifications?status=pending')->assertOk()->assertJsonPath('total', 1);
+    $this->patchJson('/api/admin/verifications/'.$verification->id, ['status' => 'rejected', 'admin_notes' => 'Please add more profile information.'])->assertOk();
+    expect($user->fresh()->verification_status)->toBe('unverified');
+    Sanctum::actingAs($user->fresh());
+    $this->postJson('/api/user/verification', ['details' => 'I have now completed my travel profile and background.'])->assertCreated();
+    Sanctum::actingAs($admin);
+    $this->patchJson('/api/admin/verifications/'.$verification->id, ['status' => 'approved', 'admin_notes' => 'Profile information reviewed.'])->assertOk();
+    expect($user->fresh()->verification_status)->toBe('verified');
+    Sanctum::actingAs($user->fresh());
+    $this->postJson('/api/user/verification', ['details' => 'Already verified account requesting again'])->assertUnprocessable();
+});

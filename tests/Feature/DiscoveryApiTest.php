@@ -134,6 +134,19 @@ test('photo upload returns a public URL replaces old files and can be removed', 
     $this->get('/api/travelers/'.$user->id.'/photo')->assertNotFound();
 });
 
+test('admin profile photos can be fetched from their profile photo URL', function () {
+    Storage::fake('public');
+    $admin = discoveryUser(['role' => 'admin']);
+    $token = $admin->createToken('test')->plainTextToken;
+    $png = base64_decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=');
+
+    $upload = $this->withToken($token)->postJson('/api/user/photo', [
+        'photo' => UploadedFile::fake()->createWithContent('admin-avatar.png', $png),
+    ])->assertOk();
+
+    $this->get($upload->json('user.profile_photo_url'))->assertOk()->assertHeader('Content-Type', 'image/png');
+});
+
 test('photo uploads reject non-images and oversized files', function () {
     Storage::fake('public');
     $token = discoveryUser()->createToken('test')->plainTextToken;
