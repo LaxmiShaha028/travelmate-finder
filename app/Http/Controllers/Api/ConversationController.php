@@ -78,7 +78,7 @@ class ConversationController extends Controller
             ], 422);
         }
 
-        abort_unless($access->allows([$currentUser->id, ...$participantIds]), 403, 'Messaging is available only between travelers accepted on the same trip.');
+        abort_unless($access->allows([$currentUser->id, ...$participantIds]), 403, 'An accepted message request is required between all participants.');
 
         if ($type === 'private') {
             $otherUserId = $participantIds[0];
@@ -134,7 +134,7 @@ class ConversationController extends Controller
             ], 403);
         }
 
-        abort_unless($access->allows($conversation->users()->pluck('users.id')->all()), 403, 'Messaging is available only while all travelers are accepted on the same trip.');
+        abort_unless($access->forConversation($conversation, $request->user()->id), 403, 'An accepted message request is required between all participants.');
 
         $conversation->load([
             'users:id,name',

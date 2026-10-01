@@ -24,7 +24,7 @@ class ChatController extends Controller
             ->with('users:id,name')
             ->orderByDesc('conversations.updated_at')
             ->get()
-            ->filter(fn (Conversation $conversation) => $access->allows($conversation->users->pluck('id')->all()))
+            ->filter(fn (Conversation $conversation) => $access->forConversation($conversation, $request->user()->id))
             ->values();
 
         $conversations->each(function (Conversation $conversation) {
@@ -97,7 +97,7 @@ class ChatController extends Controller
             $validated['user_ids']
         );
 
-        abort_unless($access->allows([$user->id, ...$participantIds]), 403, 'Messaging is available only between travelers accepted on the same trip.');
+        abort_unless($access->allows([$user->id, ...$participantIds]), 403, 'An accepted message request is required between all participants.');
 
 
         /*
@@ -203,7 +203,7 @@ class ChatController extends Controller
             ->conversations()
             ->findOrFail($id);
 
-        abort_unless($access->allows($conversation->users()->pluck('users.id')->all()), 403, 'Messaging is available only while all travelers are accepted on the same trip.');
+        abort_unless($access->forConversation($conversation, $request->user()->id), 403, 'An accepted message request is required between all participants.');
 
 
         /*
@@ -256,7 +256,7 @@ class ChatController extends Controller
                 $validated['conversation_id']
             );
 
-        abort_unless($access->allows($conversation->users()->pluck('users.id')->all()), 403, 'Messaging is available only while all travelers are accepted on the same trip.');
+        abort_unless($access->forConversation($conversation, $request->user()->id), 403, 'An accepted message request is required between all participants.');
 
 
         /*

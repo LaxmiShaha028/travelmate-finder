@@ -87,6 +87,10 @@ Route::middleware(['auth:sanctum', \App\Http\Middleware\EnsureActiveUser::class]
     Route::get('/users', [CommunicationController::class, 'users']);
 
     // Chat / Conversations
+    Route::post('/trips/{trip}/chat', [\App\Http\Controllers\Api\TripChatController::class, 'store']);
+    Route::get('/message-requests', [\App\Http\Controllers\Api\MessageRequestController::class, 'index']);
+    Route::post('/users/{user}/message-request', [\App\Http\Controllers\Api\MessageRequestController::class, 'store'])->middleware('throttle:20,1');
+    Route::patch('/message-requests/{messageRequest}', [\App\Http\Controllers\Api\MessageRequestController::class, 'update']);
     Route::get('/conversations', [ChatController::class, 'index']);
     Route::post('/conversations', [ChatController::class, 'store']);
     Route::get('/conversations/{conversation}', [ConversationController::class, 'show']);

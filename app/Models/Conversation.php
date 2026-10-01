@@ -11,6 +11,7 @@ class Conversation extends Model
         'name',
         'type',
         'messages',
+        'trip_id',
     ];
 
     protected $casts = [

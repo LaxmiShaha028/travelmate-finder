@@ -80,6 +80,7 @@ class TravelRequestController extends Controller
                 ));
             }
 
+            app(\App\Services\TripConversationAccess::class)->syncTrip($trip);
             return $this->requestList($trip, $request->user()->id);
         }, 3);
     }
@@ -92,6 +93,7 @@ class TravelRequestController extends Controller
             $trip = Trip::whereKey($trip->id)->lockForUpdate()->firstOrFail();
             $trip->travelRequests()->findOrFail($travelRequest)->delete();
 
+            app(\App\Services\TripConversationAccess::class)->syncTrip($trip);
             return $this->requestList($trip, $request->user()->id);
         }, 3);
     }
@@ -103,6 +105,7 @@ class TravelRequestController extends Controller
         return DB::transaction(function () use ($request, $trip) {
             $trip = Trip::whereKey($trip->id)->lockForUpdate()->firstOrFail();
             $trip->travelRequests()->where('user_id', $request->user()->id)->delete();
+            app(\App\Services\TripConversationAccess::class)->syncTrip($trip);
 
             return new TripResource(Trip::with('user')->withRequestSummary($request->user()->id)->findOrFail($trip->id));
         }, 3);

@@ -68,7 +68,7 @@ class MessageController extends Controller
             ], 403);
         }
 
-        abort_unless($access->allows($conversation->users()->pluck('users.id')->all()), 403, 'Messaging is available only while all travelers are accepted on the same trip.');
+        abort_unless($access->forConversation($conversation, $request->user()->id), 403, 'An accepted message request is required between all participants.');
 
         // Validate message
         $validated = $request->validate([
