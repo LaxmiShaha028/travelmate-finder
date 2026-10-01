@@ -53,6 +53,7 @@ const error = ref('')
 const loading = ref(false)
 const retryAvailable = ref(false)
 let refreshTimer
+let messageRefreshTimer
 let contactSearchRequest = 0
 let chatSearchTimer
 let chatSearchRequest = 0
@@ -132,6 +133,14 @@ const selectedPartner = computed(() => selectedConversation.value?.users
 
 const onlineMemberCount = computed(() => selectedConversation.value?.users
     ?.filter((user) => user.is_online).length || 0)
+
+const messageNotifications = computed(() => notifications.value
+    .filter((notification) => notification.data?.conversation_id))
+
+function notificationMessage(notification) {
+    return notification.data?.message
+        || `${notification.data?.sender_name || 'Someone'} sent you a message.`
+}
 
 function messageBody(message) {
     return message.message || message.text || message.body || message.content || ''
@@ -305,10 +314,10 @@ async function sendMessage() {
             conversation_id: selectedConversation.value.id,
             message,
         })
-        messages.value.push(data)
+        messages.value.push(data.data || data)
         draft.value = ''
         await loadConversations()
-        selectedConversation.value = conversations.value.find((item) => item.id === data.conversation_id) || selectedConversation.value
+        selectedConversation.value = conversations.value.find((item) => item.id === (data.data || data).conversation_id) || selectedConversation.value
         scrollMessagesToEnd()
     } catch (exception) {
         error.value = apiErrorMessage(exception, 'Message could not be sent.')
@@ -408,11 +417,26 @@ function startRefreshPolling() {
     refreshTimer = window.setInterval(() => {
         if (isAuthenticated.value) refreshData()
     }, 12000)
+    messageRefreshTimer = window.setInterval(async () => {
+        if (!isAuthenticated.value || !selectedConversation.value || loading.value) return
+
+        const conversationId = selectedConversation.value.id
+        try {
+            const { data } = await api.get(`/conversations/${conversationId}/messages`)
+            if (selectedConversation.value?.id !== conversationId) return
+            messages.value = data
+            scrollMessagesToEnd()
+        } catch {
+            // The regular refresh flow reports connection errors to the user.
+        }
+    }, 1500)
 }
 
 function stopRefreshPolling() {
     window.clearInterval(refreshTimer)
     refreshTimer = undefined
+    window.clearInterval(messageRefreshTimer)
+    messageRefreshTimer = undefined
 }
 
 async function retryConnection() {
@@ -503,9 +527,10 @@ onUnmounted(() => {
             </div>
             <aside v-if="showNotifications" class="notification-popover">
                 <strong>Notifications</strong>
-                <p v-if="!notifications.length">You're all caught up.</p>
-                <button v-for="notification in notifications" :key="notification.id" class="notification-item" :class="{ unread: !notification.read_at }" @click="openNotification(notification)">
-                    {{ notification.data.message || notification.data.title || 'TravelMate update' }}
+                <p v-if="!messageNotifications.length">No new message notifications.</p>
+                <button v-for="notification in messageNotifications" :key="notification.id" class="notification-item" :class="{ unread: !notification.read_at }" @click="openNotification(notification)">
+                    <span>{{ notificationMessage(notification) }}</span>
+                    <time>{{ formatTime(notification.created_at) }}</time>
                 </button>
             </aside>
         </header>
@@ -528,7 +553,7 @@ onUnmounted(() => {
                     </button>
                 </div>
                 <div class="conversation-list">
-                    <button v-for="conversation in visibleConversations" :key="conversation.id" class="conversation-row" :class="{ selected: selectedConversation?.id === conversation.id }" @click="openConversation(conversation)">
+                    <button v-for="conversation in visibleConversations" :key="conversation.id" type="button" class="conversation-row" :class="{ selected: selectedConversation?.id === conversation.id }" @click.prevent="openConversation(conversation)">
                         <span class="contact-avatar">{{ conversation.type === 'group' ? 'G' : (conversation.users?.find(user => user.id !== currentUser?.id)?.name?.slice(0, 1) || 'T').toUpperCase() }}</span>
                         <span class="conversation-copy">
                             <strong>{{ conversation.type === 'group' ? conversation.name : (conversation.users?.find(user => user.id !== currentUser?.id)?.name || 'Private chat') }}</strong>
@@ -538,10 +563,6 @@ onUnmounted(() => {
                     </button>
                     <p v-if="!visibleConversations.length" class="empty-list">{{ search ? 'No matching conversations.' : 'No conversations found.' }}</p>
                 </div>
-                <footer class="sidebar-footer">
-                    <button @click="toggleNotifications"><span class="footer-icon">♧</span>Notifications<span class="footer-count">{{ unreadCount }}</span></button>
-                    <button @click="toggleNotifications"><span class="footer-icon">▦</span>Trip Reminders<span class="footer-count">0</span></button>
-                </footer>
             </aside>
 
             <section class="chat-panel">
@@ -687,7 +708,8 @@ button { cursor: pointer; }
 .avatar-button { width: 36px; height: 36px; border-radius: 50%; background: #efeae0; font-weight: 700; }
 .notification-popover { position: absolute; top: 58px; right: 60px; width: min(320px, calc(100vw - 32px)); padding: 18px; background: #fff; border: 1px solid #e9e5dd; border-radius: 10px; box-shadow: 0 12px 34px #23201b1c; }
 .notification-popover p, .notification-item { color: #746e65; font-size: 13px; }
-.notification-item { width: 100%; padding: 12px 0; border: 0; border-bottom: 1px solid #eeeae4; background: transparent; text-align: left; cursor: pointer; }
+.notification-item { width: 100%; padding: 12px 0; display: flex; flex-direction: column; gap: 4px; border: 0; border-bottom: 1px solid #eeeae4; background: transparent; text-align: left; cursor: pointer; }
+.notification-item time { color: #aaa39a; font-size: 11px; font-weight: 400; }
 .notification-item.unread { color: #34312d; font-weight: 600; }
 .messenger-shell { width: min(1244px, calc(100% - 48px)); height: calc(100vh - 104px); min-height: 520px; max-height: 860px; margin: 18px auto; display: grid; grid-template-columns: 320px minmax(0, 1fr); overflow: hidden; border: 1px solid #e8e3db; border-radius: 16px; background: #fff; box-shadow: 0 14px 46px #30281b0a; }
 .conversation-sidebar { min-width: 0; display: flex; flex-direction: column; background: #eeeae2; border-right: 1px solid #e2ddd4; }
