@@ -40,7 +40,7 @@ class ProfilePhotoController extends Controller
 
     public function show(User $user)
     {
-        abort_if($user->is_blocked || ! $user->profile_photo, 404);
+        abort_if(($user->is_blocked && request()->user('sanctum')?->role !== 'admin') || ! $user->profile_photo, 404);
         abort_unless(str_starts_with($user->profile_photo, 'profile-photos/')
             && Storage::disk('public')->exists($user->profile_photo), 404);
 

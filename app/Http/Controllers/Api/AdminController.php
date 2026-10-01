@@ -120,19 +120,66 @@ class AdminController extends Controller
         DB::transaction(function () use ($report, $data, $request) {
             $report = Report::whereKey($report->id)->lockForUpdate()->firstOrFail();
             abort_unless($report->status === 'pending', 409, 'This report has already been handled.');
+            $previousState = null;
             if ($data['status'] === 'resolved' && $report->target_type === 'user') {
                 $user = User::whereKey($report->target_id)->lockForUpdate()->firstOrFail();
                 abort_if($user->role === 'admin', 422, 'Admin accounts cannot be banned from reports.');
+                $previousState = ['is_blocked' => $user->is_blocked];
                 $user->update(['is_blocked' => true]);
                 $user->tokens()->delete();
             } elseif ($data['status'] === 'resolved' && $report->target_type === 'trip') {
                 $trip = Trip::whereKey($report->target_id)->lockForUpdate()->firstOrFail();
+                $previousState = ['status' => $trip->status];
                 $trip->update(['status' => 'hidden']);
             }
-            $report->update($data + ['reviewed_by' => $request->user()->id, 'reviewed_at' => now()]);
+            $report->update($data + [
+                'moderation_previous_state' => $previousState,
+                'reviewed_by' => $request->user()->id,
+                'reviewed_at' => now(),
+            ]);
         });
 
         return response()->json(['data' => $report->fresh()]);
+    }
+
+    public function deleteReport(Report $report)
+    {
+        DB::transaction(function () use ($report) {
+            $report = Report::whereKey($report->id)->lockForUpdate()->firstOrFail();
+            abort_if($report->status === 'pending', 409, 'Handle this report before deleting it.');
+
+            if ($report->status === 'resolved') {
+                $remainingQuery = Report::where('target_type', $report->target_type)
+                    ->where('target_id', $report->target_id)
+                    ->where('status', 'resolved')
+                    ->where('id', '!=', $report->id);
+                $remaining = (clone $remainingQuery)->orderBy('reviewed_at')->orderBy('id')->lockForUpdate()->get();
+                $hasEarlierAction = (clone $remainingQuery)
+                    ->where(fn ($query) => $query->where('reviewed_at', '<', $report->reviewed_at)
+                        ->orWhere(fn ($query) => $query->where('reviewed_at', $report->reviewed_at)->where('id', '<', $report->id)))
+                    ->exists();
+
+                if ($remaining->isNotEmpty()) {
+                    if (! $hasEarlierAction && $report->moderation_previous_state) {
+                        $remaining->first()->update(['moderation_previous_state' => $report->moderation_previous_state]);
+                    }
+                } elseif ($report->target_type === 'user') {
+                    $user = User::whereKey($report->target_id)->lockForUpdate()->first();
+                    if ($user && $user->is_blocked) {
+                        $user->update(['is_blocked' => $report->moderation_previous_state['is_blocked'] ?? false]);
+                    }
+                } elseif ($report->target_type === 'trip') {
+                    $trip = Trip::whereKey($report->target_id)->lockForUpdate()->first();
+                    if ($trip && $trip->status === 'hidden') {
+                        $trip->update(['status' => $report->moderation_previous_state['status'] ?? 'open']);
+                    }
+                }
+            }
+
+            $report->delete();
+        });
+
+        return response()->noContent();
     }
 
     public function verifications(Request $request)
@@ -165,6 +212,21 @@ class AdminController extends Controller
         });
 
         return response()->json(['data' => $verification->fresh()]);
+    }
+
+    public function deleteVerification(VerificationRequest $verification)
+    {
+        DB::transaction(function () use ($verification) {
+            $verification = VerificationRequest::whereKey($verification->id)->lockForUpdate()->firstOrFail();
+            abort_if($verification->status === 'pending', 409, 'Handle this verification request before deleting it.');
+            $user = User::whereKey($verification->user_id)->lockForUpdate()->firstOrFail();
+            if ($verification->status === 'approved' && $user->verification_status === 'verified') {
+                $user->update(['verification_status' => 'unverified']);
+            }
+            $verification->delete();
+        });
+
+        return response()->noContent();
     }
 
     private function filters(Request $request, array $statuses): array

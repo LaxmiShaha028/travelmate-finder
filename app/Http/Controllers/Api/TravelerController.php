@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\DiscoveryRequest;
 use App\Http\Resources\TravelerResource;
 use App\Models\User;
+use Illuminate\Http\Request;
 
 class TravelerController extends Controller
 {
@@ -53,9 +54,9 @@ class TravelerController extends Controller
         return TravelerResource::collection($query->orderBy('id')->paginate($f['per_page'] ?? 12)->withQueryString());
     }
 
-    public function show(User $user)
+    public function show(Request $request, User $user)
     {
-        abort_if($user->is_blocked || $user->role !== 'user', 404);
+        abort_if($user->role !== 'user' || $user->is_blocked, 404);
 
         return new TravelerResource($user->load('travelPreference'));
     }

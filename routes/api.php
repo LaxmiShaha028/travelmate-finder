@@ -43,8 +43,10 @@ Route::middleware(['auth:sanctum', \App\Http\Middleware\EnsureActiveUser::class]
         Route::delete('/trips/{trip}', [\App\Http\Controllers\Api\AdminController::class, 'deleteTrip']);
         Route::get('/reports', [\App\Http\Controllers\Api\AdminController::class, 'reports']);
         Route::patch('/reports/{report}', [\App\Http\Controllers\Api\AdminController::class, 'updateReport']);
+        Route::delete('/reports/{report}', [\App\Http\Controllers\Api\AdminController::class, 'deleteReport']);
         Route::get('/verifications', [\App\Http\Controllers\Api\AdminController::class, 'verifications']);
         Route::patch('/verifications/{verification}', [\App\Http\Controllers\Api\AdminController::class, 'updateVerification']);
+        Route::delete('/verifications/{verification}', [\App\Http\Controllers\Api\AdminController::class, 'deleteVerification']);
     });
 
     // User / Profile

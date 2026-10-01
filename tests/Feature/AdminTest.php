@@ -16,7 +16,7 @@ function adminTrip(User $owner)
 test('every admin endpoint rejects guests and regular users', function () {
     $endpoints = [
         ['get', '/overview'], ['get', '/users'], ['get', '/trips'], ['get', '/reports'], ['get', '/verifications'],
-        ['patch', '/users/1'], ['patch', '/trips/1'], ['delete', '/trips/1'], ['patch', '/reports/1'], ['patch', '/verifications/1'],
+        ['patch', '/users/1'], ['patch', '/trips/1'], ['delete', '/trips/1'], ['patch', '/reports/1'], ['delete', '/reports/1'], ['patch', '/verifications/1'], ['delete', '/verifications/1'],
     ];
     $user = User::factory()->create(['role' => 'user']);
     adminTrip($user);
@@ -63,6 +63,16 @@ test('admins can search block and unblock users without changing roles', functio
     expect($user->fresh()->is_blocked)->toBeFalse();
 });
 
+test('blocked traveler profiles stay hidden from admins and public visitors', function () {
+    $blockedUser = User::factory()->create(['role' => 'user', 'is_blocked' => true]);
+    $admin = User::factory()->create(['role' => 'admin']);
+
+    $this->getJson('/api/travelers/'.$blockedUser->id)->assertNotFound();
+
+    Sanctum::actingAs($admin);
+    $this->getJson('/api/travelers/'.$blockedUser->id)->assertNotFound();
+});
+
 test('admins manage trips and analytics reflect the actual database', function () {
     $admin = User::factory()->create(['role' => 'admin']);
     $user = User::factory()->create(['role' => 'user']);
@@ -102,6 +112,9 @@ test('reports can be submitted and acted on only by admins', function () {
     $this->patchJson('/api/trips/'.$trip->id, ['status' => 'open'])->assertOk()->assertJsonPath('data.status', 'hidden');
     Sanctum::actingAs($admin);
     $this->patchJson('/api/admin/reports/'.$report->id, ['status' => 'dismissed'])->assertStatus(409);
+    $this->deleteJson('/api/admin/reports/'.$report->id)->assertNoContent();
+    expect($trip->fresh()->status)->toBe('open');
+    $this->assertDatabaseMissing('reports', ['id' => $report->id]);
 });
 
 test('resolving a user report bans the account and revokes its tokens', function () {
@@ -124,6 +137,32 @@ test('resolving a user report bans the account and revokes its tokens', function
 
     expect($reportedUser->fresh()->is_blocked)->toBeTrue()
         ->and($reportedUser->tokens()->count())->toBe(0);
+    $this->deleteJson('/api/admin/reports/'.$report->id)->assertNoContent();
+    expect($reportedUser->fresh()->is_blocked)->toBeFalse();
+});
+
+test('deleting older resolved reports restores their targets without saved state', function () {
+    $reporter = User::factory()->create(['role' => 'user']);
+    $reportedUser = User::factory()->create(['role' => 'user', 'is_blocked' => true]);
+    $owner = User::factory()->create(['role' => 'user']);
+    $trip = adminTrip($owner);
+    $trip->update(['status' => 'hidden']);
+    $admin = User::factory()->create(['role' => 'admin']);
+    $userReport = Report::create([
+        'reporter_id' => $reporter->id, 'target_type' => 'user', 'target_id' => $reportedUser->id,
+        'reason' => 'Legacy resolved user report.', 'status' => 'resolved', 'reviewed_at' => now(),
+    ]);
+    $tripReport = Report::create([
+        'reporter_id' => $reporter->id, 'target_type' => 'trip', 'target_id' => $trip->id,
+        'reason' => 'Legacy resolved trip report.', 'status' => 'resolved', 'reviewed_at' => now(),
+    ]);
+
+    Sanctum::actingAs($admin);
+    $this->deleteJson('/api/admin/reports/'.$userReport->id)->assertNoContent();
+    $this->deleteJson('/api/admin/reports/'.$tripReport->id)->assertNoContent();
+
+    expect($reportedUser->fresh()->is_blocked)->toBeFalse()
+        ->and($trip->fresh()->status)->toBe('open');
 });
 
 test('verification approval and rejection update the user profile and allow resubmission', function () {
@@ -143,6 +182,8 @@ test('verification approval and rejection update the user profile and allow resu
     Sanctum::actingAs($admin);
     $this->patchJson('/api/admin/verifications/'.$verification->id, ['status' => 'approved', 'admin_notes' => 'Profile information reviewed.'])->assertOk();
     expect($user->fresh()->verification_status)->toBe('verified');
+    $this->deleteJson('/api/admin/verifications/'.$verification->id)->assertNoContent();
+    expect($user->fresh()->verification_status)->toBe('unverified');
     Sanctum::actingAs($user->fresh());
-    $this->postJson('/api/user/verification', ['details' => 'Already verified account requesting again'])->assertUnprocessable();
+    $this->postJson('/api/user/verification', ['details' => 'The profile is ready for a new verification review.'])->assertCreated();
 });
