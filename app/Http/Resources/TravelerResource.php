@@ -16,6 +16,7 @@ class TravelerResource extends JsonResource
             'profile_photo_url' => $this->profile_photo_url,
             'age' => $this->date_of_birth ? Carbon::parse($this->date_of_birth)->age : null,
             'verification_status' => $this->verification_status,
+            'can_message' => (bool) $this->getAttribute('can_message'),
             'preferences' => $this->whenLoaded('travelPreference', function () {
                 $p = $this->travelPreference;
                 if (! $p) {

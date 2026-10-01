@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\DiscoveryRequest;
 use App\Http\Resources\TravelerResource;
 use App\Models\User;
+use App\Services\TripConversationAccess;
 use Illuminate\Http\Request;
 
 class TravelerController extends Controller
@@ -54,9 +55,13 @@ class TravelerController extends Controller
         return TravelerResource::collection($query->orderBy('id')->paginate($f['per_page'] ?? 12)->withQueryString());
     }
 
-    public function show(Request $request, User $user)
+    public function show(Request $request, User $user, TripConversationAccess $conversationAccess)
     {
         abort_if($user->role !== 'user' || $user->is_blocked, 404);
+        $viewer = $request->user('sanctum');
+        $user->setAttribute('can_message', $viewer
+            ? $conversationAccess->allows([$viewer->id, $user->id])
+            : false);
 
         return new TravelerResource($user->load('travelPreference'));
     }

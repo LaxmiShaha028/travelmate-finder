@@ -29,6 +29,25 @@ test('unfiltered travelers include users without preferences and exclude blocked
     $this->getJson('/api/travelers/'.$user->id)->assertOk()->assertJsonPath('data.preferences', null);
 });
 
+test('traveler detail exposes message access only for accepted shared trips', function () {
+    $owner = discoveryUser();
+    $traveler = discoveryUser();
+    $trip = discoveryTrip($owner);
+    $request = $trip->travelRequests()->create(['user_id' => $traveler->id, 'status' => 'pending']);
+    $token = $traveler->createToken('test')->plainTextToken;
+
+    $this->withToken($token)->getJson('/api/travelers/'.$owner->id)
+        ->assertOk()->assertJsonPath('data.can_message', false);
+
+    $request->update(['status' => 'accepted']);
+    $this->withToken($token)->getJson('/api/travelers/'.$owner->id)
+        ->assertOk()->assertJsonPath('data.can_message', true);
+
+    $request->update(['status' => 'rejected']);
+    $this->withToken($token)->getJson('/api/travelers/'.$owner->id)
+        ->assertOk()->assertJsonPath('data.can_message', false);
+});
+
 test('traveler filters combine destination date age style duration and overlapping budget', function () {
     $match = discoveryUser(['date_of_birth' => today()->subYears(25)]);
     $match->travelPreference()->create([
