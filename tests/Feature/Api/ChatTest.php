@@ -2,11 +2,28 @@
 
 use App\Models\Conversation;
 use App\Models\Message;
+use App\Models\Trip;
 use App\Models\User;
 use Illuminate\Support\Facades\Cache;
 
+function acceptChatTripMembers(User $owner, array $travelers): Trip
+{
+    $trip = $owner->trips()->create([
+        'title' => 'Accepted chat trip', 'destination' => 'Sylhet', 'start_date' => today()->addDays(10),
+        'end_date' => today()->addDays(12), 'duration_days' => 3, 'budget' => 5000,
+        'max_travelers' => count($travelers), 'status' => 'open',
+    ]);
+
+    foreach ($travelers as $traveler) {
+        $trip->travelRequests()->create(['user_id' => $traveler->id, 'status' => 'accepted']);
+    }
+
+    return $trip;
+}
+
 function makeConversationBetween(User $first, User $second): Conversation
 {
+    acceptChatTripMembers($first, [$second]);
     $conversation = Conversation::create(['type' => 'private']);
     $conversation->users()->attach([$first->id, $second->id]);
 
@@ -40,6 +57,10 @@ it('keeps the conversation list empty until the signed-in user is a member', fun
 
     $created = $this->actingAs($viewer, 'sanctum')
         ->postJson('/api/conversations', ['user_id' => $firstMember->id])
+        ->assertForbidden();
+
+    acceptChatTripMembers($viewer, [$firstMember]);
+    $created = $this->postJson('/api/conversations', ['user_id' => $firstMember->id])
         ->assertCreated();
 
     $this->actingAs($viewer, 'sanctum')
@@ -52,6 +73,7 @@ it('keeps the conversation list empty until the signed-in user is a member', fun
 it('creates a private conversation once and includes it in the user list', function () {
     $first = User::factory()->create();
     $second = User::factory()->create();
+    acceptChatTripMembers($first, [$second]);
 
     $this->actingAs($first, 'sanctum')
         ->postJson('/api/conversations', ['user_id' => $second->id])
@@ -71,6 +93,7 @@ it('creates a private conversation once and includes it in the user list', funct
 it('uses the existing Laravel session and includes the signed-in user in a private chat', function () {
     $owner = User::factory()->create();
     $contact = User::factory()->create();
+    acceptChatTripMembers($owner, [$contact]);
     $origin = config('app.url');
 
     $this->actingAs($owner)
@@ -90,6 +113,7 @@ it('uses the existing Laravel session and includes the signed-in user in a priva
 it('creates a group conversation with the requested members', function () {
     $owner = User::factory()->create();
     $members = User::factory()->count(2)->create();
+    acceptChatTripMembers($owner, $members->all());
 
     $this->actingAs($owner, 'sanctum')
         ->postJson('/api/conversations', [
@@ -105,6 +129,7 @@ it('creates a group conversation with the requested members', function () {
 it('creates a group conversation from comma-separated traveler ids', function () {
     $owner = User::factory()->create();
     $members = User::factory()->count(2)->create();
+    acceptChatTripMembers($owner, $members->all());
 
     $this->actingAs($owner, 'sanctum')
         ->postJson('/api/conversations', [
@@ -235,10 +260,40 @@ it('lets both private chat members send and retrieve persisted messages', functi
         ->assertJsonCount(2);
 });
 
+it('allows private messaging only while the trip request is accepted', function () {
+    $owner = User::factory()->create(['role' => 'user']);
+    $traveler = User::factory()->create(['role' => 'user']);
+    $trip = $owner->trips()->create([
+        'title' => 'Chat access trip', 'destination' => 'Sylhet', 'start_date' => today()->addDays(10),
+        'end_date' => today()->addDays(12), 'duration_days' => 3, 'budget' => 5000,
+        'max_travelers' => 1, 'status' => 'open',
+    ]);
+    $request = $trip->travelRequests()->create(['user_id' => $traveler->id, 'status' => 'pending']);
+
+    $this->actingAs($traveler, 'sanctum')
+        ->postJson('/api/conversations', ['user_ids' => [$owner->id]])
+        ->assertForbidden();
+
+    $request->update(['status' => 'accepted']);
+    $conversationId = $this->postJson('/api/conversations', ['user_ids' => [$owner->id]])
+        ->assertCreated()
+        ->json('id');
+    $message = $this->postJson('/api/messages', ['conversation_id' => $conversationId, 'message' => 'See you there'])
+        ->assertCreated();
+
+    $request->update(['status' => 'rejected']);
+    $this->postJson('/api/messages', ['conversation_id' => $conversationId, 'message' => 'Can you still read this?'])
+        ->assertForbidden();
+    $this->getJson('/api/conversations/'.$conversationId.'/messages')->assertForbidden();
+    $this->getJson('/api/conversations')->assertJsonCount(0);
+    expect($message->json('message'))->toBe('See you there');
+});
+
 it('lets all group members share messages and keeps outsiders out', function () {
     $owner = User::factory()->create();
     $members = User::factory()->count(2)->create();
     $outsider = User::factory()->create();
+    acceptChatTripMembers($owner, $members->all());
 
     $conversationId = $this->actingAs($owner, 'sanctum')
         ->postJson('/api/conversations', [
@@ -247,8 +302,8 @@ it('lets all group members share messages and keeps outsiders out', function () 
             'user_ids' => $members->pluck('id')->all(),
         ])
         ->assertCreated()
-        ->assertJsonCount(3, 'data.users')
-        ->json('data.id');
+        ->assertJsonCount(3, 'users')
+        ->json('id');
 
     $this->actingAs($owner, 'sanctum')
         ->postJson('/api/messages', [
@@ -274,7 +329,7 @@ it('lets all group members share messages and keeps outsiders out', function () 
     $this->actingAs($members[0], 'sanctum')
         ->getJson('/api/conversations')
         ->assertOk()
-        ->assertJsonPath('data.0.id', $conversationId);
+        ->assertJsonPath('0.id', $conversationId);
 
     $this->actingAs($outsider, 'sanctum')
         ->getJson('/api/conversations/'.$conversationId.'/messages')

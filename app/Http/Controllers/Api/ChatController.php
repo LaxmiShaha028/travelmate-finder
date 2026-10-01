@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\Conversation;
 use App\Notifications\ChatMessageNotification;
+use App\Services\TripConversationAccess;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
@@ -16,13 +17,15 @@ class ChatController extends Controller
     /**
      * সব conversation list
      */
-    public function index(Request $request)
+    public function index(Request $request, TripConversationAccess $access)
     {
         $conversations = $request->user()
             ->conversations()
             ->with('users:id,name')
             ->orderByDesc('conversations.updated_at')
-            ->get();
+            ->get()
+            ->filter(fn (Conversation $conversation) => $access->allows($conversation->users->pluck('id')->all()))
+            ->values();
 
         $conversations->each(function (Conversation $conversation) {
 
@@ -49,7 +52,7 @@ class ChatController extends Controller
     /**
      * নতুন conversation তৈরি
      */
-    public function store(Request $request)
+    public function store(Request $request, TripConversationAccess $access)
     {
         $validated = $request->validate([
             'type' => [
@@ -93,6 +96,8 @@ class ChatController extends Controller
             'intval',
             $validated['user_ids']
         );
+
+        abort_unless($access->allows([$user->id, ...$participantIds]), 403, 'Messaging is available only between travelers accepted on the same trip.');
 
 
         /*
@@ -186,7 +191,7 @@ class ChatController extends Controller
     /**
      * নির্দিষ্ট conversation-এর সব messages
      */
-    public function getMessages(Request $request, $id)
+    public function getMessages(Request $request, $id, TripConversationAccess $access)
     {
         /*
         |--------------------------------------------------------------------------
@@ -197,6 +202,8 @@ class ChatController extends Controller
         $conversation = $request->user()
             ->conversations()
             ->findOrFail($id);
+
+        abort_unless($access->allows($conversation->users()->pluck('users.id')->all()), 403, 'Messaging is available only while all travelers are accepted on the same trip.');
 
 
         /*
@@ -215,7 +222,7 @@ class ChatController extends Controller
     /**
      * নতুন message পাঠানো
      */
-    public function sendMessage(Request $request)
+    public function sendMessage(Request $request, TripConversationAccess $access)
     {
         /*
         |--------------------------------------------------------------------------
@@ -248,6 +255,8 @@ class ChatController extends Controller
             ->findOrFail(
                 $validated['conversation_id']
             );
+
+        abort_unless($access->allows($conversation->users()->pluck('users.id')->all()), 403, 'Messaging is available only while all travelers are accepted on the same trip.');
 
 
         /*

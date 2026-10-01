@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\Conversation;
+use App\Services\TripConversationAccess;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
@@ -35,7 +36,7 @@ class ConversationController extends Controller
     /**
      * Create a private conversation.
      */
-    public function store(Request $request)
+    public function store(Request $request, TripConversationAccess $access)
     {
         $rawParticipantIds = $request->input('user_ids', $request->input('traveler_ids'));
         if (is_string($rawParticipantIds)) {
@@ -76,6 +77,8 @@ class ConversationController extends Controller
                 'message' => 'You cannot start a conversation with yourself.',
             ], 422);
         }
+
+        abort_unless($access->allows([$currentUser->id, ...$participantIds]), 403, 'Messaging is available only between travelers accepted on the same trip.');
 
         if ($type === 'private') {
             $otherUserId = $participantIds[0];
@@ -118,7 +121,7 @@ class ConversationController extends Controller
     /**
      * Show one conversation with messages.
      */
-    public function show(Request $request, Conversation $conversation)
+    public function show(Request $request, Conversation $conversation, TripConversationAccess $access)
     {
         $isMember = $conversation->users()
             ->where('users.id', $request->user()->id)
@@ -130,6 +133,8 @@ class ConversationController extends Controller
                 'message' => 'You are not a member of this conversation.',
             ], 403);
         }
+
+        abort_unless($access->allows($conversation->users()->pluck('users.id')->all()), 403, 'Messaging is available only while all travelers are accepted on the same trip.');
 
         $conversation->load([
             'users:id,name',

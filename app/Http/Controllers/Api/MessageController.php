@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\Conversation;
 use App\Models\Message;
 use App\Notifications\ChatMessageNotification;
+use App\Services\TripConversationAccess;
 use App\Events\MessageSent;
 use Illuminate\Http\Request;
 use Illuminate\Database\QueryException;
@@ -53,7 +54,7 @@ class MessageController extends Controller
     /**
      * Send a message.
      */
-    public function store(Request $request, Conversation $conversation)
+    public function store(Request $request, Conversation $conversation, TripConversationAccess $access)
     {
         // Check whether current user is a member
         $isMember = $conversation->users()
@@ -66,6 +67,8 @@ class MessageController extends Controller
                 'message' => 'You are not a member of this conversation.',
             ], 403);
         }
+
+        abort_unless($access->allows($conversation->users()->pluck('users.id')->all()), 403, 'Messaging is available only while all travelers are accepted on the same trip.');
 
         // Validate message
         $validated = $request->validate([
