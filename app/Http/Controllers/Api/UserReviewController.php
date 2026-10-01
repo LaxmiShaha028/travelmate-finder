@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\User;
 use App\Models\UserReview;
+use App\Notifications\TravelActivityNotification;
 use App\Services\UserReputation;
 use Illuminate\Http\Request;
 
@@ -50,7 +51,21 @@ class UserReviewController extends Controller
         if ($data['body'] === '') {
             throw \Illuminate\Validation\ValidationException::withMessages(['body' => 'Write a review before saving.']);
         }
-        UserReview::updateOrCreate(['reviewer_id' => $viewer->id, 'reviewed_user_id' => $user->id], $data);
+        $review = UserReview::updateOrCreate(['reviewer_id' => $viewer->id, 'reviewed_user_id' => $user->id], $data);
+        if ($review->wasRecentlyCreated || $review->wasChanged()) {
+            $user->notify(new TravelActivityNotification(
+                'review_received',
+                'New traveler review',
+                "{$viewer->name} left you a review.",
+                [
+                    'review_id' => $review->id,
+                    'reviewer_id' => $viewer->id,
+                    'reviewer_name' => $viewer->name,
+                    'rating' => $review->rating,
+                    'url' => '/travelers/'.$user->id,
+                ],
+            ));
+        }
 
         return response()->json(['message' => 'Your review has been saved.']);
     }

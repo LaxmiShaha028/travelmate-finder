@@ -1,6 +1,8 @@
 <?php
 
 use App\Models\User;
+use App\Notifications\TravelActivityNotification;
+use Illuminate\Support\Facades\Notification;
 use Laravel\Sanctum\Sanctum;
 
 function requestTrip(User $owner, int $capacity = 1)
@@ -64,6 +66,70 @@ test('requests require authentication and are unique with private owner lists', 
     $response = $this->getJson($url)->assertOk()->assertJsonCount(1, 'data');
     expect($response->json('data.0.traveler'))->not->toHaveKeys(['email', 'password']);
     $this->getJson('/api/user/trips')->assertJsonPath('data.0.request_count', 1);
+});
+
+test('travel history contains only the signed-in users requested and hosted trips', function () {
+    $traveler = User::factory()->create(['role' => 'user']);
+    $organizer = User::factory()->create(['role' => 'user']);
+    $requestTrip = requestTrip($organizer);
+    $requestTrip->travelRequests()->create(['user_id' => $traveler->id, 'status' => 'accepted']);
+    $hostedTrip = requestTrip($traveler);
+    $hostedTrip->update(['status' => 'completed']);
+    requestTrip($traveler);
+    requestTrip(User::factory()->create(['role' => 'user']));
+
+    $this->getJson('/api/user/travel-history')->assertUnauthorized();
+
+    Sanctum::actingAs($traveler);
+    $this->getJson('/api/user/travel-history')
+        ->assertOk()
+        ->assertJsonCount(1, 'data.requested')
+        ->assertJsonPath('data.requested.0.trip.id', $requestTrip->id)
+        ->assertJsonPath('data.requested.0.request_status', 'accepted')
+        ->assertJsonCount(1, 'data.hosted')
+        ->assertJsonPath('data.hosted.0.id', $hostedTrip->id)
+        ->assertJsonPath('data.hosted.0.status', 'completed');
+});
+
+test('request creation notifies the owner and decisions notify only the requester', function () {
+    Notification::fake();
+    $owner = User::factory()->create(['role' => 'user']);
+    $acceptedTraveler = User::factory()->create(['role' => 'user']);
+    $rejectedTraveler = User::factory()->create(['role' => 'user']);
+    $trip = requestTrip($owner, 2);
+
+    Sanctum::actingAs($acceptedTraveler);
+    $this->postJson("/api/trips/{$trip->id}/requests")->assertOk();
+    Notification::assertSentTo($owner, TravelActivityNotification::class, fn ($notification) => $notification->eventType === 'travel_request');
+    Notification::assertNotSentTo($acceptedTraveler, TravelActivityNotification::class);
+
+    Sanctum::actingAs($rejectedTraveler);
+    $this->postJson("/api/trips/{$trip->id}/requests")->assertOk();
+    Sanctum::actingAs($owner);
+    $requests = $trip->travelRequests()->get()->keyBy('user_id');
+    $this->patchJson("/api/trips/{$trip->id}/requests/{$requests[$acceptedTraveler->id]->id}", ['status' => 'accepted'])->assertOk();
+    $this->patchJson("/api/trips/{$trip->id}/requests/{$requests[$rejectedTraveler->id]->id}", ['status' => 'rejected'])->assertOk();
+
+    Notification::assertSentTo($acceptedTraveler, TravelActivityNotification::class, fn ($notification) => $notification->eventType === 'request_accepted');
+    Notification::assertSentTo($rejectedTraveler, TravelActivityNotification::class, fn ($notification) => $notification->eventType === 'request_rejected');
+    Notification::assertNotSentTo($owner, TravelActivityNotification::class, fn ($notification) => str_starts_with($notification->eventType, 'request_'));
+});
+
+test('one day trip reminders go only to accepted travelers and are not duplicated', function () {
+    $owner = User::factory()->create(['role' => 'user']);
+    $acceptedTraveler = User::factory()->create(['role' => 'user']);
+    $pendingTraveler = User::factory()->create(['role' => 'user']);
+    $trip = requestTrip($owner, 2);
+    $trip->update(['start_date' => today()->addDay(), 'end_date' => today()->addDays(3)]);
+    $trip->travelRequests()->create(['user_id' => $acceptedTraveler->id, 'status' => 'accepted']);
+    $trip->travelRequests()->create(['user_id' => $pendingTraveler->id, 'status' => 'pending']);
+
+    expect(app(\App\Services\TripReminderSender::class)->sendForTomorrow())->toBe(1);
+    expect($acceptedTraveler->notifications()->count())->toBe(1)
+        ->and($pendingTraveler->notifications()->count())->toBe(0)
+        ->and(app(\App\Services\TripReminderSender::class)->sendForTomorrow())->toBe(0)
+        ->and($acceptedTraveler->notifications()->count())->toBe(1);
+    expect($acceptedTraveler->notifications()->first()->data['event_type'])->toBe('trip_reminder');
 });
 
 test('capacity is enforced and removing a traveler allows replacement and reacceptance', function (int $capacity) {

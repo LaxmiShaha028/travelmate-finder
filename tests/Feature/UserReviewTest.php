@@ -2,15 +2,20 @@
 
 use App\Models\User;
 use App\Models\UserReview;
+use App\Notifications\TravelActivityNotification;
 use App\Services\UserReputation;
+use Illuminate\Support\Facades\Notification;
 use Laravel\Sanctum\Sanctum;
 
 test('any signed in traveler can review another without sharing a trip and update one review', function () {
+    Notification::fake();
     $author = User::factory()->create();
     $target = User::factory()->create();
     $this->putJson('/api/travelers/'.$target->id.'/review', ['rating' => 5, 'body' => 'Friendly traveler'])->assertUnauthorized();
     Sanctum::actingAs($author);
     $this->putJson('/api/travelers/'.$target->id.'/review', ['rating' => 5, 'body' => 'Friendly traveler'])->assertOk();
+    Notification::assertSentTo($target, TravelActivityNotification::class, fn ($notification) => $notification->eventType === 'review_received');
+    Notification::assertNotSentTo($author, TravelActivityNotification::class);
     $this->putJson('/api/travelers/'.$target->id.'/review', ['rating' => 3, 'body' => 'Updated review'])->assertOk();
     $this->assertDatabaseCount('user_reviews', 1);
     $this->getJson('/api/travelers/'.$target->id.'/reviews')->assertOk()

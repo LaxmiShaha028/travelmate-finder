@@ -68,6 +68,7 @@ Route::middleware(['auth:sanctum', \App\Http\Middleware\EnsureActiveUser::class]
     Route::delete('/trips/{trip}/requests/{travelRequest}', [\App\Http\Controllers\Api\TravelRequestController::class, 'destroy'])->whereNumber('travelRequest');
     Route::patch('/trips/{trip}/requests/{travelRequest}', [\App\Http\Controllers\Api\TravelRequestController::class, 'update']);
     Route::get('/user/trips', [TripController::class, 'mine']);
+    Route::get('/user/travel-history', [TripController::class, 'history']);
     Route::post('/trips', [TripController::class, 'store']);
     Route::patch('/trips/{trip}', [TripController::class, 'update']);
 

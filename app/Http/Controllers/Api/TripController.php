@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\DiscoveryRequest;
 use App\Http\Resources\TripResource;
+use App\Models\TravelRequest;
 use App\Models\Trip;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
@@ -50,6 +51,60 @@ class TripController extends Controller
         $request->validate(['page' => 'sometimes|integer|min:1']);
 
         return TripResource::collection($request->user()->trips()->with('user')->withRequestSummary($request->user()->id)->byStartDate()->paginate(12));
+    }
+
+    public function history(Request $request)
+    {
+        $user = $request->user();
+        $requestedTrips = TravelRequest::where('user_id', $user->id)
+            ->with('trip.user')
+            ->latest()
+            ->get()
+            ->map(fn (TravelRequest $travelRequest) => [
+                'request_id' => $travelRequest->id,
+                'request_status' => $travelRequest->status,
+                'requested_at' => $travelRequest->created_at?->toISOString(),
+                'trip' => $this->historyTrip($travelRequest->trip),
+            ])
+            ->values();
+        $hostedTrips = $user->trips()
+            ->where(fn ($query) => $query
+                ->whereDate('end_date', '<', today())
+                ->orWhereIn('status', ['completed', 'cancelled', 'hidden']))
+            ->with('user')
+            ->withCount(['travelRequests as accepted_count' => fn ($query) => $query->where('status', 'accepted')])
+            ->orderByDesc('end_date')
+            ->orderByDesc('id')
+            ->get()
+            ->map(fn (Trip $trip) => $this->historyTrip($trip) + ['accepted_count' => $trip->accepted_count])
+            ->values();
+
+        return response()->json([
+            'data' => [
+                'requested' => $requestedTrips,
+                'hosted' => $hostedTrips,
+            ],
+        ]);
+    }
+
+    private function historyTrip(Trip $trip): array
+    {
+        return [
+            'id' => $trip->id,
+            'title' => $trip->title,
+            'destination' => $trip->destination,
+            'start_date' => $trip->start_date->format('Y-m-d'),
+            'end_date' => $trip->end_date->format('Y-m-d'),
+            'duration_days' => $trip->duration_days,
+            'budget' => $trip->budget,
+            'travel_style' => $trip->travel_style,
+            'status' => $trip->status,
+            'organizer' => [
+                'id' => $trip->user->id,
+                'name' => $trip->user->name,
+                'profile_photo_url' => $trip->user->profile_photo_url,
+            ],
+        ];
     }
 
     public function store(Request $request)

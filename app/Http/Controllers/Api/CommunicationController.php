@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Services\TripReminderSender;
 use App\Models\User;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
@@ -16,8 +17,9 @@ class CommunicationController extends Controller
         return response()->json(['online' => true]);
     }
 
-    public function notifications(Request $request)
+    public function notifications(Request $request, TripReminderSender $tripReminders)
     {
+        $tripReminders->sendForUser($request->user());
         $notifications = $request->user()->notifications()
             ->latest()
             ->limit(30)
