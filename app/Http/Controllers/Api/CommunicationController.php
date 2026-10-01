@@ -20,6 +20,9 @@ class CommunicationController extends Controller
     public function notifications(Request $request, TripReminderSender $tripReminders)
     {
         $tripReminders->sendForUser($request->user());
+        if ($request->isMethod('post')) {
+            $request->user()->unreadNotifications()->update(['read_at' => now()]);
+        }
         $notifications = $request->user()->notifications()
             ->latest()
             ->limit(30)

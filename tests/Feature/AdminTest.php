@@ -13,6 +13,32 @@ function adminTrip(User $owner)
     ]);
 }
 
+test('opening notifications marks only the current users notifications read', function () {
+    $user = User::factory()->create();
+    $other = User::factory()->create();
+    foreach ([$user, $other] as $recipient) {
+        $recipient->notify(new \App\Notifications\TravelActivityNotification('report_received', 'New report', 'A report was submitted.'));
+    }
+    Sanctum::actingAs($user);
+    $this->postJson('/api/notifications/read-all')->assertOk()->assertJsonPath('unread_count', 0);
+    $this->getJson('/api/notifications')->assertOk()->assertJsonPath('unread_count', 0)->assertJsonCount(1, 'notifications');
+    expect($other->unreadNotifications()->count())->toBe(1);
+});
+
+test('admin reports filter trips and mates before pagination', function () {
+    $admin = User::factory()->create(['role' => 'admin']);
+    foreach (['trip', 'user'] as $type) {
+        Report::create(['reporter_id' => $admin->id, 'target_type' => $type, 'target_id' => 1, 'reason' => 'Filter test report', 'status' => 'pending']);
+    }
+    Sanctum::actingAs($admin);
+    foreach (['trip', 'user'] as $type) {
+        $this->getJson('/api/admin/reports?target_type='.$type.'&status=pending&search=Filter')
+            ->assertOk()->assertJsonPath('total', 1)->assertJsonPath('data.0.target_type', $type);
+    }
+    $this->getJson('/api/admin/reports')->assertOk()->assertJsonPath('total', 2);
+    $this->getJson('/api/admin/reports?target_type=invalid')->assertUnprocessable();
+});
+
 test('every admin endpoint rejects guests and regular users', function () {
     $endpoints = [
         ['get', '/overview'], ['get', '/users'], ['get', '/trips'], ['get', '/reports'], ['get', '/verifications'],
@@ -99,16 +125,20 @@ test('reports can be submitted and acted on only by admins', function () {
     $this->postJson('/api/reports', $input + ['status' => 'resolved'])->assertCreated()->assertJsonPath('data.status', 'pending');
     $this->postJson('/api/reports', $input)->assertCreated();
     $this->assertDatabaseCount('reports', 1);
+    expect($admin->notifications()->count())->toBe(1);
+    expect($owner->notifications()->count())->toBe(0);
     $this->postJson('/api/reports', ['target_type' => 'user', 'target_id' => $reporter->id, 'reason' => 'Cannot report myself'])->assertUnprocessable();
     $report = Report::first();
     Sanctum::actingAs($admin);
     $this->getJson('/api/admin/reports?status=pending')->assertOk()->assertJsonPath('total', 1);
+    $this->getJson('/api/notifications')->assertOk()->assertJsonPath('notifications.0.data.event_type', 'report_received');
     $this->patchJson('/api/admin/reports/'.$report->id, ['status' => 'resolved'])->assertOk();
     expect($report->fresh()->reviewed_by)->toBe($admin->id);
     expect($trip->fresh()->status)->toBe('hidden');
     $this->getJson('/api/trips')->assertJsonPath('meta.total', 0);
     $this->getJson('/api/admin/trips?status=hidden')->assertJsonPath('total', 1);
     Sanctum::actingAs($owner);
+    $this->getJson('/api/notifications')->assertOk()->assertJsonPath('notifications.0.data.event_type', 'report_accepted');
     $this->patchJson('/api/trips/'.$trip->id, ['status' => 'open'])->assertOk()->assertJsonPath('data.status', 'hidden');
     Sanctum::actingAs($admin);
     $this->patchJson('/api/admin/reports/'.$report->id, ['status' => 'dismissed'])->assertStatus(409);
@@ -137,6 +167,7 @@ test('resolving a user report bans the account and revokes its tokens', function
 
     expect($reportedUser->fresh()->is_blocked)->toBeTrue()
         ->and($reportedUser->tokens()->count())->toBe(0);
+    expect($reportedUser->notifications()->first()->data['event_type'])->toBe('report_accepted');
     $this->deleteJson('/api/admin/reports/'.$report->id)->assertNoContent();
     expect($reportedUser->fresh()->is_blocked)->toBeFalse();
 });
@@ -173,6 +204,7 @@ test('verification approval and rejection update the user profile and allow resu
     expect($user->fresh()->verification_status)->toBe('pending');
     $this->postJson('/api/user/verification', ['details' => 'Duplicate verification request details'])->assertStatus(409);
     $verification = VerificationRequest::first();
+    expect($admin->notifications()->where('data->event_type', 'verification_requested')->count())->toBe(1);
     Sanctum::actingAs($admin);
     $this->getJson('/api/admin/verifications?status=pending')->assertOk()->assertJsonPath('total', 1);
     $this->patchJson('/api/admin/verifications/'.$verification->id, ['status' => 'rejected', 'admin_notes' => 'Please add more profile information.'])->assertOk();
@@ -182,7 +214,10 @@ test('verification approval and rejection update the user profile and allow resu
     Sanctum::actingAs($admin);
     $this->patchJson('/api/admin/verifications/'.$verification->id, ['status' => 'approved', 'admin_notes' => 'Profile information reviewed.'])->assertOk();
     expect($user->fresh()->verification_status)->toBe('verified');
+    expect($user->notifications()->where('data->event_type', 'verification_approved')->count())->toBe(1);
+    expect($user->notifications()->where('data->event_type', 'verification_rejected')->count())->toBe(1);
     $this->deleteJson('/api/admin/verifications/'.$verification->id)->assertNoContent();
+    expect($user->notifications()->where('data->event_type', 'verification_removed')->count())->toBe(1);
     expect($user->fresh()->verification_status)->toBe('unverified');
     Sanctum::actingAs($user->fresh());
     $this->postJson('/api/user/verification', ['details' => 'The profile is ready for a new verification review.'])->assertCreated();

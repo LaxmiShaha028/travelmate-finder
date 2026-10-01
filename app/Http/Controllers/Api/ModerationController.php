@@ -7,6 +7,7 @@ use App\Models\Report;
 use App\Models\Trip;
 use App\Models\User;
 use App\Models\VerificationRequest;
+use App\Notifications\TravelActivityNotification;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
@@ -28,6 +29,16 @@ class ModerationController extends Controller
             'reporter_id' => $request->user()->id, 'target_type' => $data['target_type'],
             'target_id' => $target->id, 'status' => 'pending',
         ], ['reason' => $data['reason']]);
+
+        if ($report->wasRecentlyCreated) {
+            User::where('role', 'admin')->where('is_blocked', false)->each(function ($admin) use ($report, $request) {
+                $admin->notify(new TravelActivityNotification(
+                    'report_received', 'New report',
+                    $request->user()->name.' submitted a report about '.($report->target_type === 'trip' ? 'a trip' : 'a traveler').'.',
+                    ['report_id' => $report->id, 'target_type' => $report->target_type, 'target_id' => $report->target_id, 'sender' => $request->user()->name],
+                ));
+            });
+        }
 
         return response()->json(['message' => 'Report submitted for admin review.', 'data' => $report], 201);
     }
@@ -52,6 +63,13 @@ class ModerationController extends Controller
                 'reviewed_by' => null, 'reviewed_at' => null,
             ]);
             $user->update(['verification_status' => 'pending']);
+            User::where('role', 'admin')->where('is_blocked', false)->each(function ($admin) use ($application, $user) {
+                $admin->notify(new TravelActivityNotification(
+                    'verification_requested', 'New verification request',
+                    $user->name.' requested profile verification.',
+                    ['verification_id' => $application->id, 'sender' => $user->name],
+                ));
+            });
 
             return response()->json(['data' => $application], 201);
         });

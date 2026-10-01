@@ -77,6 +77,7 @@ Route::middleware(['auth:sanctum', \App\Http\Middleware\EnsureActiveUser::class]
 
     // Notifications
     Route::get('/notifications', [CommunicationController::class, 'notifications']);
+    Route::post('/notifications/read-all', [CommunicationController::class, 'notifications']);
     Route::post('/notifications/{id}/read', [CommunicationController::class, 'markNotificationRead']);
 
     // Presence

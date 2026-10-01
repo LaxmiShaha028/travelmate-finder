@@ -15,15 +15,15 @@ class DiscoveryDemoSeeder extends Seeder
         }
         $destinations = ["Cox's Bazar", 'Sylhet', 'Bandarban', 'Sajek Valley', 'Dhaka', 'Chattogram'];
         $styles = ['Adventure', 'Relaxed', 'Budget', 'Luxury', 'Backpacking', 'Photography'];
-        $names = ['Amina Demo', 'Rafi Demo', 'Nadia Demo', 'Sami Demo', 'Maya Demo', 'Arif Demo',
-            'Lina Demo', 'Fahim Demo', 'Sara Demo', 'Rohan Demo', 'Tania Demo', 'Imran Demo'];
+        $names = ['Amina', 'Rafi', 'Nadia', 'Sami', 'Maya', 'Arif',
+            'Lina', 'Fahim', 'Sara', 'Rohan', 'Tania', 'Imran'];
         foreach ($names as $i => $name) {
             // Stable demo-only email keys make reruns safe without touching real accounts.
             $user = User::firstOrCreate(['email' => 'traveler-'.($i + 1).'@demo.travelmate.test'], [
                 'name' => $name,
                 'password' => Str::random(64),
                 'date_of_birth' => today()->subYears(20 + $i * 3)->format('Y-m-d'),
-                'bio' => 'Demo traveler who enjoys discovering new places and meeting travel companions.',
+                'bio' => 'Enjoys discovering new places and meeting travel companions.',
             ]);
             $destination = $destinations[$i % count($destinations)];
             $style = $styles[$i % count($styles)];

@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\Report;
+use App\Notifications\TravelActivityNotification;
 use App\Models\TravelRequest;
 use App\Models\Trip;
 use App\Models\User;
@@ -101,7 +102,11 @@ class AdminController extends Controller
     public function reports(Request $request)
     {
         $data = $this->filters($request, ['pending', 'resolved', 'dismissed']);
+        $type = $request->validate(['target_type' => ['nullable', 'in:trip,user']]);
         $query = Report::with('reporter:id,name,email');
+        if (! empty($type['target_type'])) {
+            $query->where('target_type', $type['target_type']);
+        }
         if (! empty($data['status'])) {
             $query->where('status', $data['status']);
         }
@@ -137,6 +142,16 @@ class AdminController extends Controller
                 'reviewed_by' => $request->user()->id,
                 'reviewed_at' => now(),
             ]);
+            if ($data['status'] === 'resolved') {
+                $recipient = $report->target_type === 'user' ? $user : $trip->user;
+                $recipient?->notify(new TravelActivityNotification(
+                    'report_accepted', 'Report accepted by admin',
+                    $report->target_type === 'user'
+                        ? 'An admin accepted a report about your account. Your account has been blocked.'
+                        : 'An admin accepted a report about your trip "'.$trip->title.'". The trip has been hidden.',
+                    ['report_id' => $report->id, 'target_type' => $report->target_type, 'target_id' => $report->target_id, 'sender' => 'Admin'],
+                ));
+            }
         });
 
         return response()->json(['data' => $report->fresh()]);
@@ -209,6 +224,11 @@ class AdminController extends Controller
             abort_if($user->is_blocked && $data['status'] === 'approved', 422, 'Unblock this user before approving verification.');
             $verification->update($data + ['reviewed_by' => $request->user()->id, 'reviewed_at' => now()]);
             $user->update(['verification_status' => $data['status'] === 'approved' ? 'verified' : 'unverified']);
+            $user->notify(new TravelActivityNotification(
+                'verification_'.$data['status'], 'Profile verification '.$data['status'],
+                'Your verification request was '.$data['status'].'. '.$data['admin_notes'],
+                ['verification_id' => $verification->id, 'sender' => 'Admin'],
+            ));
         });
 
         return response()->json(['data' => $verification->fresh()]);
@@ -223,6 +243,13 @@ class AdminController extends Controller
             if ($verification->status === 'approved' && $user->verification_status === 'verified') {
                 $user->update(['verification_status' => 'unverified']);
             }
+            $user->notify(new TravelActivityNotification(
+                'verification_removed', 'Verification request removed',
+                $verification->status === 'approved'
+                    ? 'An admin removed your profile verification. You can submit a new verification request.'
+                    : 'An admin removed your verification request. You can submit a new request.',
+                ['verification_id' => $verification->id, 'sender' => 'Admin'],
+            ));
             $verification->delete();
         });
 
