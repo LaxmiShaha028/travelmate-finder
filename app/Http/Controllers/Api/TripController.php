@@ -8,6 +8,7 @@ use App\Http\Resources\TripResource;
 use App\Models\Trip;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
 
@@ -16,7 +17,7 @@ class TripController extends Controller
     public function index(DiscoveryRequest $request)
     {
         $f = $request->validated();
-        $q = Trip::visible()->with('user');
+        $q = Trip::visible()->with('user')->withRequestSummary($request->user('sanctum')?->id);
         foreach (['destination', 'travel_style'] as $key) {
             if (! empty($f[$key])) {
                 $q->where($key, $f[$key]);
@@ -41,14 +42,14 @@ class TripController extends Controller
         abort_unless(($trip->status === 'open' && ! $trip->user->is_blocked && $trip->user->role === 'user')
             || ($owner && ! $owner->is_blocked && $owner->id === $trip->user_id), 404);
 
-        return new TripResource($trip->load('user'));
+        return new TripResource(Trip::with('user')->withRequestSummary($owner?->id)->findOrFail($trip->id));
     }
 
     public function mine(Request $request)
     {
         $request->validate(['page' => 'sometimes|integer|min:1']);
 
-        return TripResource::collection($request->user()->trips()->with('user')->byStartDate()->paginate(12));
+        return TripResource::collection($request->user()->trips()->with('user')->withRequestSummary($request->user()->id)->byStartDate()->paginate(12));
     }
 
     public function store(Request $request)
@@ -63,9 +64,16 @@ class TripController extends Controller
     public function update(Request $request, Trip $trip)
     {
         abort_unless($trip->user_id === $request->user()->id && ! $request->user()->is_blocked, 403);
-        $trip->update($this->validateTrip($request, $trip));
+        return DB::transaction(function () use ($request, $trip) {
+            $trip = Trip::whereKey($trip->id)->lockForUpdate()->firstOrFail();
+            $data = $this->validateTrip($request, $trip);
+            if (isset($data['max_travelers']) && $data['max_travelers'] < $trip->travelRequests()->where('status', 'accepted')->count()) {
+                throw ValidationException::withMessages(['max_travelers' => 'Remove accepted travelers before reducing the number of places.']);
+            }
+            $trip->update($data);
 
-        return new TripResource($trip->fresh()->load('user'));
+            return new TripResource(Trip::with('user')->withRequestSummary($request->user()->id)->findOrFail($trip->id));
+        }, 3);
     }
 
     private function validateTrip(Request $request, ?Trip $trip = null): array

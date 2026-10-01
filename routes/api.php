@@ -42,6 +42,11 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::delete('/user/photo', [ProfilePhotoController::class, 'destroy']);
 
     // Trips
+    Route::get('/trips/{trip}/requests', [\App\Http\Controllers\Api\TravelRequestController::class, 'index']);
+    Route::post('/trips/{trip}/requests', [\App\Http\Controllers\Api\TravelRequestController::class, 'store']);
+    Route::delete('/trips/{trip}/requests/mine', [\App\Http\Controllers\Api\TravelRequestController::class, 'destroyMine']);
+    Route::delete('/trips/{trip}/requests/{travelRequest}', [\App\Http\Controllers\Api\TravelRequestController::class, 'destroy'])->whereNumber('travelRequest');
+    Route::patch('/trips/{trip}/requests/{travelRequest}', [\App\Http\Controllers\Api\TravelRequestController::class, 'update']);
     Route::get('/user/trips', [TripController::class, 'mine']);
     Route::post('/trips', [TripController::class, 'store']);
     Route::patch('/trips/{trip}', [TripController::class, 'update']);
