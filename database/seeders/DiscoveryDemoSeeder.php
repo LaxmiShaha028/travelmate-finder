@@ -38,7 +38,9 @@ class DiscoveryDemoSeeder extends Seeder
                 'min_budget' => $budget, 'max_budget' => $budget + 2500,
                 'travel_start' => $start, 'travel_end' => $end, 'duration_days' => $duration,
             ]);
-            $user->trips()->updateOrCreate(['title' => 'Demo journey to '.$destination], [
+            $user->trips()->where('title', 'Demo journey to '.$destination)
+                ->update(['title' => $destination]);
+            $user->trips()->updateOrCreate(['title' => $destination], [
                 'destination' => $destination, 'description' => 'A sample itinerary for testing the discovery API.',
                 'start_date' => $start, 'end_date' => $end, 'duration_days' => $duration,
                 'budget' => $budget, 'travel_style' => $style, 'max_travelers' => 4, 'status' => 'open',

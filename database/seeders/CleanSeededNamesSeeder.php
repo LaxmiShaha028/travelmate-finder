@@ -29,6 +29,11 @@ class CleanSeededNamesSeeder extends Seeder
             }
             User::where('bio', 'Demo traveler who enjoys discovering new places and meeting travel companions.')
                 ->update(['bio' => 'Enjoys discovering new places and meeting travel companions.']);
+            foreach (DB::table('trips')->where('title', 'like', 'Demo journey to %')->get(['id', 'title', 'destination']) as $trip) {
+                if ($trip->title === 'Demo journey to '.$trip->destination) {
+                    DB::table('trips')->where('id', $trip->id)->update(['title' => $trip->destination]);
+                }
+            }
         });
     }
 }

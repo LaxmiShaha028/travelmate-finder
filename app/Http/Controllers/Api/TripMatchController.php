@@ -22,7 +22,7 @@ class TripMatchController extends Controller
 
         if ($complete) {
             // Rank all eligible trips before taking a page of recommendations.
-            foreach (Trip::visible()->where('user_id', '!=', $request->user()->id)
+            foreach (Trip::visible()->with('user')->where('user_id', '!=', $request->user()->id)
                 ->whereDate('start_date', '>=', $today->toDateString())->lazyById(200) as $trip) {
                 $score = $matcher->compare($answers, $trip, $today);
                 if ($score['matched_count'] > 0) {
@@ -34,6 +34,13 @@ class TripMatchController extends Controller
                         'end_date' => $trip->end_date->format('Y-m-d'),
                         'budget' => $trip->budget,
                         'travel_style' => $trip->travel_style,
+                        'status' => $trip->status,
+                        'duration_days' => $trip->duration_days,
+                        'organizer' => [
+                            'id' => $trip->user->id,
+                            'name' => $trip->user->name,
+                            'profile_photo_url' => $trip->user->profile_photo_url,
+                        ],
                         ...$score,
                     ]);
                 }
